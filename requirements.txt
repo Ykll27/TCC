@@ -1,0 +1,11 @@
+flask
+gunicorn
+qrcode
+pillow
+opencv-python-headless
+numpy
+python-dotenv
+google-genai
+werkzeug
+PyMuPDF
+reportlab

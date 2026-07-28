@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Atlas - Gerar folhas{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+    <div><h1 class="atlas-title">Gerar folhas de resposta</h1><p class="atlas-subtitle mb-0">{{ avaliacao.titulo }}</p></div>
+    <div class="d-flex gap-2"><a class="btn btn-outline-primary" href="{{ url_for('ver_avaliacao', avaliacao_id=avaliacao.id) }}">Ver prova</a><a class="btn btn-outline-dark" href="{{ url_for('ver_gabarito_avaliacao', avaliacao_id=avaliacao.id) }}">Gabarito</a></div>
+</div>
+<form method="POST" class="card atlas-card"><div class="card-body p-4">
+    <div class="row g-4">
+        <div class="col-md-4">
+            <h2 class="atlas-title h5">Turmas</h2>
+            {% for turma in turmas %}<div class="form-check"><input class="form-check-input" type="checkbox" name="turmas" value="{{ turma.turma }}" id="turma{{ loop.index }}"><label class="form-check-label" for="turma{{ loop.index }}">{{ turma.turma }}</label></div>{% else %}<p class="small-muted">Nenhuma turma cadastrada.</p>{% endfor %}
+        </div>
+        <div class="col-md-8">
+            <div class="d-flex justify-content-between align-items-center"><h2 class="atlas-title h5">Alunos</h2><button class="btn btn-sm btn-outline-primary" type="button" onclick="marcarTodos()">Marcar todos</button></div>
+            <div class="table-responsive" style="max-height:430px;overflow:auto"><table class="table table-sm align-middle"><thead><tr><th></th><th>Nome</th><th>Matrícula</th><th>Turma</th></tr></thead><tbody>{% for aluno in alunos %}<tr><td><input class="form-check-input aluno-check" type="checkbox" name="aluno_ids" value="{{ aluno.id }}"></td><td>{{ aluno.nome }}</td><td>{{ aluno.matricula }}</td><td>{{ aluno.turma }}</td></tr>{% else %}<tr><td colspan="4" class="text-muted">Cadastre alunos primeiro.</td></tr>{% endfor %}</tbody></table></div>
+        </div>
+    </div>
+    <div class="mt-4 d-flex gap-2"><button class="btn btn-success" type="submit">Gerar folhas personalizadas</button><a class="btn btn-outline-secondary" href="{{ url_for('home') }}">Voltar</a></div>
+</div></form>
+{% endblock %}
+{% block scripts %}<script>function marcarTodos(){document.querySelectorAll('.aluno-check').forEach(c=>c.checked=true);}</script>{% endblock %}

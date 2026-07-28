@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Atlas - Detalhe do resultado{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+    <div><h1 class="atlas-title">Detalhe da correção</h1><p class="atlas-subtitle mb-0">{{ resultado.aluno_nome }} · {{ resultado.prova_titulo }}</p></div>
+    <a class="btn btn-atlas no-print" href="{{ url_for('home') }}">Voltar</a>
+</div>
+<div class="row g-3 mb-4">
+    <div class="col-md-3"><div class="metric"><div class="small-muted">Nota</div><div class="value">{{ resultado.nota_percentual }}%</div></div></div>
+    <div class="col-md-3"><div class="metric"><div class="small-muted">Aluno</div><strong>{{ resultado.aluno_nome }}</strong><div class="small-muted">{{ resultado.turma }} · {{ resultado.matricula }}</div></div></div>
+    <div class="col-md-3"><div class="metric"><div class="small-muted">Confiança</div><strong>{{ resultado.status_confianca or 'confiavel' }}</strong></div></div>
+    <div class="col-md-3"><div class="metric"><div class="small-muted">Data</div><strong>{{ resultado.criado_em }}</strong></div></div>
+</div>
+<div class="card atlas-card"><div class="card-body p-4">
+    <h2 class="atlas-title h4">Questão por questão</h2>
+    {% set res = dados.resultado or {} %}
+    <div class="table-responsive">
+        <table class="table align-middle">
+            <thead><tr><th>Questão</th><th>Aluno</th><th>Correta</th><th>Status</th></tr></thead>
+            <tbody>
+            {% for d in res.detalhes or [] %}
+                <tr><td>{{ d.questao }}</td><td>{{ d.resposta_aluno }}</td><td>{{ d.resposta_correta }}</td><td>{% if d.status == 'correta' %}<span class="badge text-bg-success">correta</span>{% elif d.status == 'errada' %}<span class="badge text-bg-danger">errada</span>{% else %}<span class="badge text-bg-warning">nula/branco</span>{% endif %}</td></tr>
+            {% else %}<tr><td colspan="4" class="text-muted">Sem detalhes salvos.</td></tr>{% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div></div>
+{% endblock %}

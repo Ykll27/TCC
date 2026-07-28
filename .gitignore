@@ -1,0 +1,14 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.env
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+uploads/*
+!uploads/.gitkeep
+static/qrcodes/*
+!static/qrcodes/.gitkeep
+static/pdfs/*
+!static/pdfs/.gitkeep

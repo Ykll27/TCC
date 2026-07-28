@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Atlas - Geração{% endblock %}
+{% block content %}
+<div class="card atlas-card"><div class="card-body p-4 p-lg-5">
+    <h1 class="atlas-title">Preparando avaliação</h1>
+    <p class="atlas-subtitle">O Atlas processa em segundo plano para não travar a interface do professor.</p>
+    <div class="mb-3"><div class="d-flex justify-content-between mb-1"><strong>Status: <span id="statusTexto">{{ tarefa.status }}</span></strong><span id="progressoTexto">{{ tarefa.progresso or 0 }}%</span></div><div class="progress" style="height:24px"><div id="barraProgresso" class="progress-bar progress-bar-striped progress-bar-animated" style="width: {{ tarefa.progresso or 0 }}%">{{ tarefa.progresso or 0 }}%</div></div></div>
+    <div id="mensagem" class="alert alert-info">{{ tarefa.mensagem or 'Aguardando início.' }}</div>
+    <div id="erroBox" class="alert alert-danger d-none"></div>
+    <div id="acoesProntas" class="d-none"><div class="alert alert-success">Avaliação pronta. Revise a prova antes de imprimir.</div><div class="d-flex flex-wrap gap-2"><a id="btnAbrirProva" class="btn btn-atlas" href="#">Abrir prova</a><a id="btnBaixarPdf" class="btn btn-outline-secondary" href="#">Baixar PDF</a><a id="btnGerarFolhas" class="btn btn-success" href="#">Gerar folhas</a><a class="btn btn-outline-dark" href="{{ url_for('home') }}">Painel</a></div></div>
+</div></div>
+{% endblock %}
+{% block scripts %}
+<script>
+const statusTexto=document.getElementById('statusTexto'), progressoTexto=document.getElementById('progressoTexto'), barra=document.getElementById('barraProgresso'), mensagem=document.getElementById('mensagem'), erroBox=document.getElementById('erroBox'), acoesProntas=document.getElementById('acoesProntas');
+const btnAbrirProva=document.getElementById('btnAbrirProva'), btnBaixarPdf=document.getElementById('btnBaixarPdf'), btnGerarFolhas=document.getElementById('btnGerarFolhas');
+let redirecionou=false; const eventos=new EventSource("{{ url_for('eventos_tarefa', tarefa_id=tarefa.id) }}");
+eventos.onmessage=(event)=>{const data=JSON.parse(event.data); const progresso=Number(data.progresso||0); statusTexto.textContent=data.status||'processando'; progressoTexto.textContent=`${progresso}%`; barra.style.width=`${progresso}%`; barra.textContent=`${progresso}%`; mensagem.textContent=data.mensagem||'Processando...'; if(data.status==='concluido'){eventos.close(); barra.classList.remove('progress-bar-animated','progress-bar-striped'); barra.classList.add('bg-success'); btnAbrirProva.href=data.url_avaliacao||'#'; btnBaixarPdf.href=data.url_pdf||'#'; btnGerarFolhas.href=data.url_folhas||'#'; acoesProntas.classList.remove('d-none'); if(data.url_avaliacao&&!redirecionou){redirecionou=true; setTimeout(()=>{window.location.href=data.url_avaliacao;},1500)}} if(data.status==='erro'){eventos.close(); barra.classList.remove('progress-bar-animated','progress-bar-striped'); barra.classList.add('bg-danger'); erroBox.textContent=data.erro||'Erro desconhecido.'; erroBox.classList.remove('d-none')}};
+eventos.onerror=()=>{mensagem.textContent='A conexão de status caiu. Recarregue a página para consultar o andamento.'};
+</script>
+{% endblock %}

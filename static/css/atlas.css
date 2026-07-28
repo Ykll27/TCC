@@ -1,0 +1,29 @@
+:root {
+  --atlas-900: #0b1f3a;
+  --atlas-800: #102a4c;
+  --atlas-700: #153b66;
+  --atlas-500: #2f80ed;
+  --atlas-300: #9ec5fe;
+  --atlas-bg: #f4f8fb;
+  --atlas-card: #ffffff;
+}
+* { box-sizing: border-box; }
+body { background: var(--atlas-bg); color: #152238; }
+.atlas-navbar { background: linear-gradient(135deg, var(--atlas-900), var(--atlas-700)); }
+.atlas-brand { font-weight: 900; letter-spacing: .4px; }
+.atlas-logo { width: 36px; height: 36px; border-radius: 12px; display: inline-grid; place-items: center; background: #fff; color: var(--atlas-800); font-weight: 900; }
+.atlas-card { border: 0; border-radius: 22px; box-shadow: 0 14px 38px rgba(10, 31, 58, .08); }
+.atlas-title { color: var(--atlas-900); font-weight: 900; letter-spacing: -.02em; }
+.atlas-subtitle { color: #5b6b82; }
+.atlas-hero { background: radial-gradient(circle at top right, rgba(47,128,237,.24), transparent 30%), linear-gradient(135deg, #ffffff, #eef6ff); border-radius: 28px; border: 1px solid rgba(47,128,237,.14); }
+.step-badge { width: 34px; height: 34px; display: inline-grid; place-items: center; border-radius: 12px; background: #e7f1ff; color: var(--atlas-700); font-weight: 800; }
+.metric { border-radius: 18px; background: #f8fbff; border: 1px solid #e5eef8; padding: 1rem; }
+.metric .value { font-size: 1.7rem; font-weight: 900; color: var(--atlas-900); }
+.btn-atlas { background: var(--atlas-700); color: white; border: none; }
+.btn-atlas:hover { background: var(--atlas-900); color: white; }
+.table thead th { color: #294462; font-size: .86rem; text-transform: uppercase; letter-spacing: .02em; }
+.small-muted { color: #6c7a91; font-size: .88rem; }
+.drop-area { border: 2px dashed #9dc3d7; border-radius: 18px; background: #f8fcff; padding: 22px; text-align: center; cursor: pointer; transition: .2s; }
+.drop-area.dragover { background: #e5f4ff; border-color: var(--atlas-700); }
+.badge-soft { background: #eaf2ff; color: var(--atlas-700); }
+@media print { .no-print { display:none !important; } body { background: white; } .atlas-card { box-shadow: none; border: none; } }

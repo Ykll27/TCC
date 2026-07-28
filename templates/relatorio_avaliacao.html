@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Atlas - Relatório{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+    <div>
+        <h1 class="atlas-title">Relatório da turma</h1>
+        <p class="atlas-subtitle mb-0">{{ relatorio.avaliacao.titulo }} · {{ relatorio.avaliacao.materias }}</p>
+    </div>
+    <div class="d-flex gap-2 no-print">
+        <button class="btn btn-outline-secondary" onclick="window.print()">Imprimir relatório</button>
+        <a class="btn btn-atlas" href="{{ url_for('home') }}">Voltar</a>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-2"><div class="metric"><div class="small-muted">Corrigidas</div><div class="value">{{ relatorio.corrigidas }}/{{ relatorio.total_folhas }}</div></div></div>
+    <div class="col-md-2"><div class="metric"><div class="small-muted">Média</div><div class="value">{{ relatorio.media }}%</div></div></div>
+    <div class="col-md-2"><div class="metric"><div class="small-muted">Maior</div><div class="value">{{ relatorio.maior }}%</div></div></div>
+    <div class="col-md-2"><div class="metric"><div class="small-muted">Menor</div><div class="value">{{ relatorio.menor }}%</div></div></div>
+    <div class="col-md-2"><div class="metric"><div class="small-muted">Desvio</div><div class="value">{{ relatorio.desvio }}</div></div></div>
+    <div class="col-md-2"><div class="metric"><div class="small-muted">Críticas</div><div class="value">{{ relatorio.questoes_criticas|length }}</div></div></div>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-7">
+        <div class="card atlas-card mb-4"><div class="card-body p-4">
+            <h2 class="atlas-title h4">Desempenho por questão</h2>
+            <canvas id="graficoQuestoes" height="140"></canvas>
+        </div></div>
+    </div>
+    <div class="col-lg-5">
+        <div class="card atlas-card mb-4"><div class="card-body p-4">
+            <h2 class="atlas-title h4">Questões críticas</h2>
+            <div class="list-group list-group-flush">
+            {% for q in relatorio.questoes_criticas %}
+                <div class="list-group-item px-0">
+                    <div class="d-flex justify-content-between"><strong>Q{{ q.questao }}</strong><span class="badge text-bg-danger">{{ q.percentual_erro }}% erro</span></div>
+                    <div class="small-muted">{{ q.conteudo }} · {{ q.habilidade }}</div>
+                </div>
+            {% else %}<p class="small-muted mb-0">Sem dados suficientes.</p>{% endfor %}
+            </div>
+        </div></div>
+    </div>
+</div>
+
+<div class="card atlas-card mb-4"><div class="card-body p-4">
+    <h2 class="atlas-title h4">Conteúdos/habilidades</h2>
+    <div class="table-responsive">
+        <table class="table align-middle">
+            <thead><tr><th>Conteúdo</th><th>Acerto</th><th>Status pedagógico</th></tr></thead>
+            <tbody>
+                {% for c in relatorio.por_conteudo %}
+                <tr>
+                    <td>{{ c.conteudo }}</td>
+                    <td style="min-width:180px"><div class="progress"><div class="progress-bar {% if c.percentual_acerto < 60 %}bg-danger{% elif c.percentual_acerto < 75 %}bg-warning{% else %}bg-success{% endif %}" style="width: {{ c.percentual_acerto }}%">{{ c.percentual_acerto }}%</div></div></td>
+                    <td>{% if c.percentual_acerto < 60 %}<span class="badge text-bg-danger">Revisar</span>{% elif c.percentual_acerto < 75 %}<span class="badge text-bg-warning">Atenção</span>{% else %}<span class="badge text-bg-success">Dominado</span>{% endif %}</td>
+                </tr>
+                {% else %}<tr><td colspan="3" class="text-muted">Sem dados por conteúdo.</td></tr>{% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div></div>
+
+<div class="card atlas-card"><div class="card-body p-4">
+    <h2 class="atlas-title h4">Alunos corrigidos</h2>
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead><tr><th>Aluno</th><th>Turma</th><th>Nota</th><th>Acertos</th><th>Erros</th><th>Anuladas/branco</th></tr></thead>
+            <tbody>
+            {% for item in relatorio.alunos_resultados %}
+                <tr><td>{{ item.linha.aluno_nome }}</td><td>{{ item.linha.turma }}</td><td><strong>{{ item.linha.nota_percentual }}%</strong></td><td>{{ item.resumo.acertos }}</td><td>{{ item.resumo.erros }}</td><td>{{ item.resumo.anuladas_ou_em_branco }}</td></tr>
+            {% else %}<tr><td colspan="6" class="text-muted">Nenhum resultado corrigido para essa avaliação.</td></tr>{% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div></div>
+{% endblock %}
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+const questoes = {{ relatorio.por_questao|tojson }};
+new Chart(document.getElementById('graficoQuestoes'), {
+  type: 'bar',
+  data: { labels: questoes.map(q => 'Q' + q.questao), datasets: [{ label: '% de acerto', data: questoes.map(q => q.percentual_acerto) }] },
+  options: { responsive: true, scales: { y: { beginAtZero: true, max: 100 } } }
+});
+</script>
+{% endblock %}

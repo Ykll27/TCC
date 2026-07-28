@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+    <head>
+        <meta charset="UTF-8" />
+        <title>Folha de Respostas</title>
+
+        <style>
+            @page {
+                size: A4;
+                margin: 10mm;
+            }
+            * {
+                box-sizing: border-box;
+            }
+
+            body {
+                font-family: Arial, Helvetica, sans-serif;
+                margin: 0;
+                background: white;
+                color: #111;
+            }
+
+            .page {
+                width: 190mm;
+                min-height: 277mm;
+                margin: auto;
+                position: relative;
+                padding: 14mm 10mm 10mm 10mm;
+                border: 1px solid #d7e7ef;
+            }
+
+            .anchor {
+                width: 18px;
+                height: 18px;
+                background: #000;
+                border-radius: 50%;
+                position: absolute;
+            }
+            .a1 {
+                top: 4mm;
+                left: 4mm;
+            }
+            .a2 {
+                top: 4mm;
+                right: 4mm;
+            }
+            .a3 {
+                bottom: 4mm;
+                left: 4mm;
+            }
+            .a4 {
+                bottom: 4mm;
+                right: 4mm;
+            }
+
+            .header {
+                border: 2px solid #4f7f96;
+                border-radius: 10px;
+                padding: 8px;
+                display: grid;
+                grid-template-columns: 1fr 38mm;
+                gap: 8px;
+                margin-bottom: 10px;
+            }
+
+            .logo {
+                font-size: 20px;
+                font-weight: 800;
+                color: #073b5c;
+                margin-bottom: 8px;
+            }
+            .field-label {
+                font-size: 11px;
+                font-weight: 700;
+            }
+
+            .name-box {
+                background: #eaf2f6;
+                border-radius: 6px;
+                padding: 8px;
+                font-size: 22px;
+                margin-top: 5px;
+                border-bottom: 2px solid #9fb4c0;
+            }
+
+            .qr-area {
+                border-left: 1px solid #4f7f96;
+                text-align: center;
+                padding-left: 6px;
+            }
+            .qr-area img {
+                width: 80px;
+                height: 80px;
+            }
+            .meta {
+                font-size: 10px;
+                margin-bottom: 4px;
+                text-align: right;
+                font-weight: 700;
+            }
+
+            .grid {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+                align-items: flex-start;
+            }
+
+            .coluna {
+                width: 150px;
+                background: #eef5f8;
+                padding: 6px;
+                border-radius: 4px;
+            }
+
+            .qrow {
+                white-space: nowrap;
+                font-size: 14px;
+                margin-bottom: 5px;
+            }
+            .qnum {
+                display: inline-block;
+                width: 26px;
+                font-weight: 700;
+            }
+
+            .bubble {
+                display: inline-block;
+                width: 18px;
+                height: 18px;
+                border: 2px solid #111;
+                border-radius: 50%;
+                text-align: center;
+                line-height: 14px;
+                font-size: 11px;
+                margin-left: 3px;
+                font-weight: 700;
+            }
+
+            .instructions {
+                margin-top: 10px;
+                border-top: 2px solid #111;
+                padding-top: 6px;
+                font-size: 12px;
+            }
+            .print-btn {
+                margin: 10px;
+                padding: 10px 20px;
+            }
+
+            @media print {
+                .print-btn {
+                    display: none;
+                }
+                .page {
+                    border: none;
+                }
+            }
+        </style>
+    </head>
+
+    <body>
+        <button class="print-btn" onclick="window.print()">
+            Imprimir folha
+        </button>
+
+        <div class="page">
+            <div class="anchor a1"></div>
+            <div class="anchor a2"></div>
+            <div class="anchor a3"></div>
+            <div class="anchor a4"></div>
+
+            <div class="header">
+                <div>
+                    <div class="logo">☑ ATLAS - GABARITO DE RESPOSTAS</div>
+                    <div class="field-label">NOME COMPLETO DO(A) ALUNO(A):</div>
+                    <div class="name-box">{{ prova.aluno_nome }}</div>
+
+                    <p style="font-size: 12px; margin: 8px 0 0 0">
+                        <strong>Turma:</strong> {{ prova.turma }} &nbsp;&nbsp;
+                        <strong>Matrícula:</strong> {{ prova.matricula }}
+                    </p>
+                </div>
+
+                <div class="qr-area">
+                    <div class="meta">{{ prova.titulo }}</div>
+                    <div class="field-label">CÓDIGO QR - IDENTIFICAÇÃO</div>
+                    <img
+                        src="{{ url_for('static', filename='qrcodes/' ~ prova.qr_arquivo) }}"
+                    />
+                </div>
+            </div>
+
+            <div class="grid">
+                {% set por_coluna = 10 %} {% set total_colunas =
+                ((prova.total_questoes - 1) // por_coluna) + 1 %} {% for coluna
+                in range(total_colunas) %}
+                <div class="coluna">
+                    {% set inicio = (coluna * por_coluna) + 1 %} {% set fim =
+                    inicio + por_coluna %} {% for q in range(inicio, fim) %} {%
+                    if q <= prova.total_questoes %}
+                    <div class="qrow">
+                        <span class="qnum">{{ "%02d"|format(q) }}</span>
+                        <span class="bubble">A</span>
+                        <span class="bubble">B</span>
+                        <span class="bubble">C</span>
+                        <span class="bubble">D</span>
+                        <span class="bubble">E</span>
+                    </div>
+                    {% endif %} {% endfor %}
+                </div>
+                {% endfor %}
+            </div>
+
+            <div class="instructions">
+                <strong>INSTRUÇÕES PARA PREENCHIMENTO:</strong>
+                Preencha totalmente o círculo com caneta preta. Não amasse, não
+                rasure e não marque duas alternativas na mesma questão. O QR
+                Code e o nome devem estar legíveis.
+            </div>
+        </div>
+    </body>
+</html>

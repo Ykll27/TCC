@@ -1,0 +1,18 @@
+ATLAS - Manual rápido
+
+1. Crie uma conta de professor.
+2. Cadastre alunos manualmente ou importe CSV com nome,turma,matricula.
+3. Crie uma avaliação.
+4. Revise questões e gabarito antes de imprimir.
+5. Gere folhas por aluno/turma.
+6. Corrija por upload ou pelo Scan em tempo real.
+7. Abra o relatório da avaliação para ver média, questões críticas e conteúdos que precisam de revisão.
+
+Política de IA mínima:
+- O Atlas tenta usar cache/banco local primeiro.
+- A IA só entra quando autorizada no criador de prova ou quando a leitura por upload fica pouco confiável.
+- No Scan em tempo real a IA fica desligada para manter baixa latência.
+
+Câmera:
+- Funciona em localhost ou HTTPS.
+- Ao sair da página de Scan, a câmera é desligada automaticamente.

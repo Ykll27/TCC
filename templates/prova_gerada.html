@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Atlas - Avaliação{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4 no-print">
+    <div><h1 class="atlas-title">{{ avaliacao.titulo }}</h1><p class="atlas-subtitle mb-0">{{ avaliacao.materias }} · {{ avaliacao.total_questoes }} questão(ões)</p></div>
+    <div class="d-flex flex-wrap gap-2"><a class="btn btn-outline-secondary" href="{{ url_for('editar_avaliacao', avaliacao_id=avaliacao.id) }}">Revisar</a><a class="btn btn-outline-primary" href="{{ url_for('baixar_pdf_avaliacao', avaliacao_id=avaliacao.id) }}">Baixar PDF</a><a class="btn btn-outline-dark" href="{{ url_for('ver_gabarito_avaliacao', avaliacao_id=avaliacao.id) }}">Gabarito</a><a class="btn btn-success" href="{{ url_for('selecionar_alunos_avaliacao', avaliacao_id=avaliacao.id) }}">Gerar folhas</a></div>
+</div>
+<div class="card atlas-card mb-4"><div class="card-body p-4">
+    <h1 class="text-center fw-bold">{{ avaliacao.titulo }}</h1>
+    <p><strong>Matérias:</strong> {{ avaliacao.materias }}</p>
+    <p><strong>Temas:</strong> {{ avaliacao.temas or '-' }}</p>
+    {% if avaliacao.orientacoes %}<p><strong>Orientações:</strong> {{ avaliacao.orientacoes }}</p>{% endif %}
+    {% if avaliacao.status_revisao != 'revisada' %}<div class="alert alert-warning no-print">Revise as questões e o gabarito antes de imprimir a versão final.</div>{% endif %}
+</div></div>
+{% for q in avaliacao.questoes %}
+<div class="card atlas-card mb-3"><div class="card-body p-4">
+    <div class="small-muted mb-2">Questão {{ "%02d"|format(q.numero|int) }} · {{ q.area }} · {{ q.tema }}</div>
+    {% if q.contexto %}<p>{{ q.contexto }}</p>{% endif %}
+    <p><strong>{{ q.enunciado }}</strong></p>
+    <ol type="A" class="mb-0">{% for alt in ['A','B','C','D','E'] %}<li class="mb-2">{{ q.alternativas[alt] }}</li>{% endfor %}</ol>
+</div></div>
+{% endfor %}
+{% endblock %}

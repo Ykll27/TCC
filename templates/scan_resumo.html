@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Atlas - Resumo Scan{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+    <div><h1 class="atlas-title">Resumo da sessão de Scan</h1><p class="atlas-subtitle mb-0">Sessão #{{ sessao.id }} · {{ sessao.modo }}</p></div>
+    <div class="d-flex gap-2"><a class="btn btn-atlas" href="{{ url_for('scan_tempo_real') }}">Nova sessão</a><a class="btn btn-outline-secondary" href="{{ url_for('home') }}">Painel</a></div>
+</div>
+<div class="row g-3 mb-4">
+    <div class="col-md-3"><div class="metric"><div class="small-muted">Total</div><div class="value">{{ sessao.total_processados }}</div></div></div>
+    <div class="col-md-3"><div class="metric"><div class="small-muted">Sucesso</div><div class="value">{{ sessao.total_sucesso }}</div></div></div>
+    <div class="col-md-3"><div class="metric"><div class="small-muted">Revisão</div><div class="value">{{ sessao.total_revisao }}</div></div></div>
+    <div class="col-md-3"><div class="metric"><div class="small-muted">Tempo médio</div><div class="value">{{ sessao.tempo_medio_ms|round|int }} ms</div></div></div>
+</div>
+<div class="card atlas-card"><div class="card-body p-4">
+    <h2 class="atlas-title h4">Leituras</h2>
+    <div class="table-responsive"><table class="table table-hover align-middle"><thead><tr><th>Aluno</th><th>Prova</th><th>Nota</th><th>Tempo</th><th>Status</th><th>Mensagem</th></tr></thead><tbody>{% for l in leituras %}<tr><td>{{ l.aluno_nome or 'Não identificado' }}</td><td>{{ l.prova_titulo }}</td><td><strong>{{ l.nota_percentual or '-' }}%</strong></td><td>{{ l.latencia_ms|round|int if l.latencia_ms else '-' }} ms</td><td><span class="badge {% if l.status == 'ok' %}text-bg-success{% else %}text-bg-warning{% endif %}">{{ l.status }}</span></td><td>{{ l.mensagem }}</td></tr>{% else %}<tr><td colspan="6" class="text-muted">Nenhuma leitura.</td></tr>{% endfor %}</tbody></table></div>
+</div></div>
+{% endblock %}
