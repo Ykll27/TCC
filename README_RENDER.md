@@ -38,3 +38,13 @@ O modo Scan desliga a câmera automaticamente ao finalizar a sessão, sair da p�
 ## Primeiro acesso
 
 Ao abrir o sistema online, crie a conta do professor em `/cadastro`.
+
+## Banco persistente
+
+Configure um PostgreSQL externo e adicione a variável:
+
+```env
+DATABASE_URL=postgresql://usuario:senha@host:porta/banco
+```
+
+Sem `DATABASE_URL`, o Atlas usa SQLite local apenas para teste. No Render, não use SQLite local para contas reais.
