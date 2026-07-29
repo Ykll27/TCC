@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Atlas - Encerramento de ano{% endblock %}
+{% block content %}
+<div class="mb-4"><h1 class="atlas-title">Arquivo mestre de encerramento de ano</h1><p class="atlas-subtitle">Arquive avaliações, folhas e resultados antigos para deixar o painel limpo para o próximo ciclo.</p></div>
+<div class="row g-4">
+  <div class="col-lg-5"><div class="card atlas-card"><div class="card-body p-4">
+    <h2 class="h4 atlas-title">Dados abertos</h2>
+    <ul class="list-group mb-3"><li class="list-group-item d-flex justify-content-between">Avaliações <strong>{{ totais_abertos.avaliacoes }}</strong></li><li class="list-group-item d-flex justify-content-between">Folhas <strong>{{ totais_abertos.provas }}</strong></li><li class="list-group-item d-flex justify-content-between">Resultados <strong>{{ totais_abertos.resultados }}</strong></li></ul>
+    <form method="post" onsubmit="return confirm('Arquivar o ano letivo? O painel principal ficará limpo para novos lançamentos.');">
+      <label class="form-label">Ano letivo</label><input class="form-control mb-2" name="ano_letivo" value="{{ ano_padrao }}">
+      <label class="form-label">Descrição</label><textarea class="form-control mb-3" name="descricao" rows="3" placeholder="Ex.: Encerramento do 3º bimestre/ano letivo"></textarea>
+      <button class="btn btn-danger w-100">Arquivar dados abertos</button>
+    </form>
+  </div></div></div>
+  <div class="col-lg-7"><div class="card atlas-card"><div class="card-body p-4"><h2 class="h4 atlas-title">Histórico de arquivos</h2><div class="table-responsive"><table class="table"><thead><tr><th>Ano</th><th>Descrição</th><th>Totais</th><th>Data</th></tr></thead><tbody>{% for a in arquivos %}{% set t = carregar_json_seguro(a.totais_json,{}) %}<tr><td>{{ a.ano_letivo }}</td><td>{{ a.descricao or '-' }}</td><td>{{ t }}</td><td>{{ a.criado_em }}</td></tr>{% else %}<tr><td colspan="4" class="text-muted">Nenhum arquivo criado.</td></tr>{% endfor %}</tbody></table></div></div></div></div>
+</div>
+{% endblock %}

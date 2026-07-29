@@ -1,5 +1,7 @@
 import os
 import json
+import base64
+import hashlib
 from typing import Dict, Any, Optional, List, Tuple
 
 import cv2
@@ -22,6 +24,11 @@ MODELO_GEMINI = os.getenv("MODELO_GEMINI", "gemini-2.0-flash")
 ALTERNATIVAS = ["A", "B", "C", "D", "E"]
 QUESTOES_POR_COLUNA = 10
 
+# Dimensão lógica usada após retificar a folha por marcadores.
+# Mantém as bolhas em posições previsíveis, mesmo com foto inclinada.
+WARP_LARGURA = 800
+WARP_ALTURA = 1100
+
 
 gemini_client = None
 if GOOGLE_API_KEY and genai:
@@ -38,6 +45,152 @@ def ler_imagem(caminho_imagem: str):
     except Exception:
         return cv2.imread(caminho_imagem)
 
+
+
+def ordenar_pontos(pts: np.ndarray) -> np.ndarray:
+    """Ordena 4 pontos como: top-left, top-right, bottom-right, bottom-left.
+
+    A ordenação usa a técnica clássica por soma e diferença das coordenadas:
+    - menor soma x+y => superior esquerdo;
+    - maior soma x+y => inferior direito;
+    - menor diferença x-y => superior direito;
+    - maior diferença x-y => inferior esquerdo.
+    """
+    pts = np.asarray(pts, dtype="float32").reshape(4, 2)
+    rect = np.zeros((4, 2), dtype="float32")
+    soma = pts.sum(axis=1)
+    diff = np.diff(pts, axis=1).reshape(-1)
+
+    rect[0] = pts[np.argmin(soma)]      # top-left
+    rect[2] = pts[np.argmax(soma)]      # bottom-right
+    rect[1] = pts[np.argmin(diff)]      # top-right
+    rect[3] = pts[np.argmax(diff)]      # bottom-left
+    return rect
+
+
+def _threshold_marcadores(imagem: np.ndarray) -> np.ndarray:
+    gray = cv2.cvtColor(imagem, cv2.COLOR_BGR2GRAY)
+    blur = cv2.GaussianBlur(gray, (5, 5), 0)
+    # Marcadores são quadrados pretos preenchidos. O threshold inverso deixa
+    # esses marcadores brancos para o findContours.
+    return cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
+
+
+def localizar_marcadores_canto(imagem: np.ndarray) -> Tuple[Optional[np.ndarray], Dict[str, Any]]:
+    """Localiza os 4 marcadores pretos da folha.
+
+    Retorna os centros dos marcadores ordenados e um diagnóstico. Se não achar
+    4 marcadores confiáveis, retorna None para permitir fallback sem retificação.
+    """
+    if imagem is None:
+        return None, {"aplicado": False, "motivo": "imagem_none"}
+
+    altura, largura = imagem.shape[:2]
+    area_img = float(altura * largura)
+    thresh = _threshold_marcadores(imagem)
+    contornos, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    candidatos = []
+    min_lado = max(10, int(min(largura, altura) * 0.010))
+    max_lado = max(45, int(min(largura, altura) * 0.090))
+
+    for contorno in contornos:
+        x, y, w, h = cv2.boundingRect(contorno)
+        if w <= 0 or h <= 0:
+            continue
+        area = cv2.contourArea(contorno)
+        proporcao = w / float(h)
+        if not (0.72 <= proporcao <= 1.28):
+            continue
+        if not (min_lado <= w <= max_lado and min_lado <= h <= max_lado):
+            continue
+        if not (area_img * 0.00008 <= area <= area_img * 0.012):
+            continue
+
+        perimetro = cv2.arcLength(contorno, True)
+        approx = cv2.approxPolyDP(contorno, 0.04 * perimetro, True)
+        if len(approx) < 4:
+            continue
+
+        area_rect = float(w * h)
+        preenchimento = area / area_rect if area_rect else 0
+        if preenchimento < 0.55:
+            continue
+
+        cx, cy = x + w / 2.0, y + h / 2.0
+        candidatos.append({"x": x, "y": y, "w": w, "h": h, "cx": cx, "cy": cy, "area": area})
+
+    if len(candidatos) < 4:
+        return None, {"aplicado": False, "motivo": "marcadores_insuficientes", "candidatos": len(candidatos)}
+
+    cantos_alvo = {
+        "tl": np.array([0.0, 0.0]),
+        "tr": np.array([float(largura), 0.0]),
+        "br": np.array([float(largura), float(altura)]),
+        "bl": np.array([0.0, float(altura)]),
+    }
+
+    escolhidos = []
+    usados = set()
+    for nome, alvo in cantos_alvo.items():
+        melhor = None
+        melhor_dist = None
+        for idx, c in enumerate(candidatos):
+            if idx in usados:
+                continue
+            # Exige que cada marcador esteja razoavelmente perto de algum canto.
+            cx, cy = c["cx"], c["cy"]
+            perto_borda_x = cx <= largura * 0.28 or cx >= largura * 0.72
+            perto_borda_y = cy <= altura * 0.28 or cy >= altura * 0.72
+            if not (perto_borda_x and perto_borda_y):
+                continue
+            dist = float(np.linalg.norm(np.array([cx, cy]) - alvo))
+            if melhor is None or dist < melhor_dist:
+                melhor = (idx, c)
+                melhor_dist = dist
+        if melhor is None:
+            return None, {"aplicado": False, "motivo": f"marcador_{nome}_nao_encontrado", "candidatos": len(candidatos)}
+        usados.add(melhor[0])
+        escolhidos.append([melhor[1]["cx"], melhor[1]["cy"]])
+
+    pts = ordenar_pontos(np.array(escolhidos, dtype="float32"))
+    largura_topo = np.linalg.norm(pts[1] - pts[0])
+    largura_base = np.linalg.norm(pts[2] - pts[3])
+    altura_esq = np.linalg.norm(pts[3] - pts[0])
+    altura_dir = np.linalg.norm(pts[2] - pts[1])
+
+    if min(largura_topo, largura_base, altura_esq, altura_dir) < min(largura, altura) * 0.35:
+        return None, {"aplicado": False, "motivo": "marcadores_muito_proximos", "candidatos": len(candidatos)}
+
+    return pts, {"aplicado": True, "candidatos": len(candidatos), "pontos": pts.tolist()}
+
+
+def alinhar_por_marcadores(imagem: np.ndarray, largura: int = WARP_LARGURA, altura: int = WARP_ALTURA) -> Tuple[np.ndarray, Dict[str, Any]]:
+    """Retifica a folha para uma imagem padrão usando os 4 marcadores."""
+    pontos, diagnostico = localizar_marcadores_canto(imagem)
+    if pontos is None:
+        # Fallback: mantém imagem original para não bloquear correções antigas.
+        return imagem, diagnostico
+
+    destino = np.array(
+        [[0, 0], [largura - 1, 0], [largura - 1, altura - 1], [0, altura - 1]],
+        dtype="float32",
+    )
+    matriz = cv2.getPerspectiveTransform(pontos.astype("float32"), destino)
+    alinhada = cv2.warpPerspective(imagem, matriz, (largura, altura))
+    diagnostico.update({"largura": largura, "altura": altura})
+    return alinhada, diagnostico
+
+
+def ler_qrcode_de_imagem(imagem: np.ndarray) -> Optional[Dict[str, Any]]:
+    detector = cv2.QRCodeDetector()
+    dados, _, _ = detector.detectAndDecode(imagem)
+    if not dados:
+        return None
+    try:
+        return json.loads(dados)
+    except json.JSONDecodeError:
+        return {"conteudo_qr": dados}
 
 def normalizar_gabarito_oficial(gabarito: Dict[str, str]) -> Dict[str, str]:
     """Garante chaves 1..N em texto e respostas em A-E ou NULA."""
@@ -62,23 +215,22 @@ def ler_qrcode(caminho_imagem: str) -> Optional[Dict[str, Any]]:
     if imagem is None:
         return None
 
-    detector = cv2.QRCodeDetector()
-    dados, _, _ = detector.detectAndDecode(imagem)
-
-    if not dados:
-        return None
-
-    try:
-        return json.loads(dados)
-    except json.JSONDecodeError:
-        return {"conteudo_qr": dados}
+    # Primeiro tenta na imagem alinhada. Se os marcadores não existirem ou o QR
+    # não for lido após o warp, tenta a imagem original.
+    alinhada, _ = alinhar_por_marcadores(imagem)
+    dados = ler_qrcode_de_imagem(alinhada)
+    if dados:
+        return dados
+    return ler_qrcode_de_imagem(imagem)
 
 
 def preparar_imagem(caminho_imagem: str):
-    imagem = ler_imagem(caminho_imagem)
+    imagem_original = ler_imagem(caminho_imagem)
 
-    if imagem is None:
-        return None, None, None
+    if imagem_original is None:
+        return None, None, None, {"aplicado": False, "motivo": "imagem_nao_lida"}
+
+    imagem, diagnostico_alinhamento = alinhar_por_marcadores(imagem_original)
 
     gray = cv2.cvtColor(imagem, cv2.COLOR_BGR2GRAY)
     blur = cv2.GaussianBlur(gray, (5, 5), 0)
@@ -87,7 +239,7 @@ def preparar_imagem(caminho_imagem: str):
         blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
     )[1]
 
-    return imagem, gray, thresh
+    return imagem, gray, thresh, diagnostico_alinhamento
 
 
 def _contornos_candidatos_bolhas(thresh: np.ndarray) -> List[Dict[str, Any]]:
@@ -338,6 +490,24 @@ def _pontuacao_preenchimento(thresh: np.ndarray, bolha: Dict[str, Any]) -> float
     return float(np.count_nonzero(pixels > 0) / pixels.size)
 
 
+
+def _encode_recorte_base64(imagem: np.ndarray, bolhas: List[Dict[str, Any]], margem: int = 22) -> Optional[str]:
+    """Gera um pequeno recorte PNG/base64 da linha da questão para revisão rápida."""
+    if imagem is None or not bolhas:
+        return None
+    altura, largura = imagem.shape[:2]
+    x1 = max(0, int(min(b["x"] for b in bolhas)) - margem - 48)
+    y1 = max(0, int(min(b["y"] for b in bolhas)) - margem)
+    x2 = min(largura, int(max(b["x"] + b["w"] for b in bolhas)) + margem)
+    y2 = min(altura, int(max(b["y"] + b["h"] for b in bolhas)) + margem)
+    recorte = imagem[y1:y2, x1:x2]
+    if recorte.size == 0:
+        return None
+    ok, buf = cv2.imencode(".png", recorte)
+    if not ok:
+        return None
+    return "data:image/png;base64," + base64.b64encode(buf.tobytes()).decode("ascii")
+
 def _decidir_alternativa(scores: Dict[str, float]) -> Tuple[str, str]:
     """Decide alternativa marcada ou NULA a partir dos preenchimentos.
 
@@ -374,7 +544,7 @@ def _decidir_alternativa(scores: Dict[str, float]) -> Tuple[str, str]:
     return "NULA", "baixa"
 
 def detectar_respostas_omr(caminho_imagem: str, total_questoes: int) -> Dict[str, Any]:
-    imagem, gray, thresh = preparar_imagem(caminho_imagem)
+    imagem, gray, thresh, alinhamento = preparar_imagem(caminho_imagem)
 
     if imagem is None:
         return {
@@ -386,6 +556,7 @@ def detectar_respostas_omr(caminho_imagem: str, total_questoes: int) -> Dict[str
     respostas = {str(i): "NULA" for i in range(1, total_questoes + 1)}
     confiancas = {str(i): "baixa" for i in range(1, total_questoes + 1)}
     scores_por_questao = {}
+    recortes_revisao = []
 
     candidatos = _contornos_candidatos_bolhas(thresh)
     linhas = _agrupar_por_linhas(candidatos)
@@ -404,6 +575,16 @@ def detectar_respostas_omr(caminho_imagem: str, total_questoes: int) -> Dict[str
         respostas[questao] = resposta
         confiancas[questao] = confianca
         scores_por_questao[questao] = scores
+
+        if resposta == "NULA" or confianca == "baixa":
+            recorte = _encode_recorte_base64(imagem, bolhas)
+            if recorte:
+                recortes_revisao.append({
+                    "questao": questao,
+                    "motivo": "Marcação ausente, rasurada ou ambígua.",
+                    "imagem": recorte,
+                    "scores": scores,
+                })
 
     detectadas = sum(1 for r in respostas.values() if r != "NULA")
     questoes_mapeadas = len(mapa_questoes)
@@ -435,6 +616,8 @@ def detectar_respostas_omr(caminho_imagem: str, total_questoes: int) -> Dict[str
         "bolhas_candidatas": len(candidatos),
         "marcacoes_detectadas": detectadas,
         "scores": scores_por_questao,
+        "alinhamento": alinhamento,
+        "recortes_revisao": recortes_revisao[:12],
     }
 
 
@@ -659,11 +842,56 @@ def comparar_respostas(gabarito_oficial, respostas_aluno):
     }
 
 
+
+def normalizar_mapa_alternativas(mapa: Optional[Dict[str, Any]], total_questoes: int) -> Dict[str, Dict[str, str]]:
+    """Normaliza mapa impresso -> original por questão.
+
+    Exemplo: {"1": {"A": "D", "B": "C"}} significa que, na folha daquele
+    aluno, marcar A equivale à alternativa original D.
+    """
+    if not isinstance(mapa, dict):
+        mapa = {}
+    normalizado = {}
+    identidade = {alt: alt for alt in ALTERNATIVAS}
+    for i in range(1, total_questoes + 1):
+        q = str(i)
+        bruto = mapa.get(q, {}) if isinstance(mapa, dict) else {}
+        if not isinstance(bruto, dict):
+            bruto = {}
+        m = {}
+        for alt in ALTERNATIVAS:
+            valor = str(bruto.get(alt, alt)).upper()[:1]
+            m[alt] = valor if valor in ALTERNATIVAS else alt
+        # Garante permutação; se vier corrompido, usa identidade.
+        if sorted(m.values()) != ALTERNATIVAS:
+            m = dict(identidade)
+        normalizado[q] = m
+    return normalizado
+
+
+def converter_respostas_por_mapa(respostas: Dict[str, str], mapa_alternativas: Optional[Dict[str, Any]], total_questoes: int) -> Tuple[Dict[str, str], Dict[str, Any]]:
+    """Converte letras marcadas na folha do aluno para as alternativas originais."""
+    mapa = normalizar_mapa_alternativas(mapa_alternativas, total_questoes)
+    convertidas = {}
+    detalhes = {}
+    for i in range(1, total_questoes + 1):
+        q = str(i)
+        marcada = str(respostas.get(q, "NULA")).upper()
+        if marcada in ALTERNATIVAS:
+            original = mapa[q].get(marcada, marcada)
+        else:
+            original = "NULA"
+        convertidas[q] = original
+        detalhes[q] = {"marcada_na_folha": marcada, "alternativa_original": original, "mapa": mapa[q]}
+    return convertidas, detalhes
+
 def corrigir_imagem_web(
     caminho_gabarito_aluno: str,
     gabarito_oficial: Dict[str, str],
     caminho_gabarito_professor: Optional[str] = None,
     usar_ia="auto",
+    mapa_alternativas: Optional[Dict[str, Any]] = None,
+    tipo_prova: str = "A",
 ):
     gabarito_oficial = normalizar_gabarito_oficial(gabarito_oficial)
     total = len(gabarito_oficial)
@@ -699,8 +927,13 @@ def corrigir_imagem_web(
     else:
         erro_ia = "IA não usada: leitura por OpenCV suficiente ou modo em tempo real."
 
-    respostas_finais = escolher_respostas_finais(omr, ia_resultado, total)
+    respostas_finais_folha = escolher_respostas_finais(omr, ia_resultado, total)
+    respostas_finais, detalhes_mapa = converter_respostas_por_mapa(respostas_finais_folha, mapa_alternativas, total)
     resultado = comparar_respostas(gabarito_oficial, respostas_finais)
+    for item in resultado.get("detalhes", []):
+        q = str(item.get("questao"))
+        if q in detalhes_mapa:
+            item.update(detalhes_mapa[q])
 
     # Debug aparece no terminal do Flask. Isso ajuda a descobrir por que veio 0%.
     print("\n===== DEBUG CORREÇÃO =====")
@@ -709,7 +942,9 @@ def corrigir_imagem_web(
     print("Questões mapeadas:", omr.get("questoes_mapeadas"))
     print("Marcações OMR:", omr.get("marcacoes_detectadas"))
     print("Erro IA:", erro_ia)
-    print("Respostas finais:", respostas_finais)
+    print("Tipo de prova:", tipo_prova)
+    print("Respostas lidas na folha:", respostas_finais_folha)
+    print("Respostas convertidas:", respostas_finais)
     print("Resultado:", resultado)
     print("==========================\n")
 
@@ -717,6 +952,9 @@ def corrigir_imagem_web(
         "status": "corrigido_com_python_opencv_ia",
         "dados_qr": dados_qr,
         "gabarito_professor_extraido": gabarito_oficial,
+        "tipo_prova": tipo_prova,
+        "mapa_alternativas": normalizar_mapa_alternativas(mapa_alternativas, total),
+        "gabarito_aluno_impresso": respostas_finais_folha,
         "gabarito_aluno_extraido": respostas_finais,
         "resultado": resultado,
         "processamento": {

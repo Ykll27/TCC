@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Sobre o Atlas{% endblock %}
+{% block content %}
+<div class="atlas-hero p-4 p-lg-5 mb-4">
+  <span class="badge badge-soft rounded-pill mb-3">Sistema educacional · OpenCV · IA mínima</span>
+  <h1 class="atlas-title display-6">Sobre o Atlas</h1>
+  <p class="lead atlas-subtitle">O Atlas é uma plataforma web para criação, aplicação, correção automática e análise de avaliações escolares.</p>
+</div>
+<div class="row g-4">
+  <div class="col-lg-7"><div class="card atlas-card"><div class="card-body p-4"><h2 class="h4 atlas-title">Problema resolvido</h2><p>Professores perdem tempo criando avaliações, imprimindo folhas, corrigindo gabaritos e organizando resultados. O Atlas reduz esse trabalho com um fluxo integrado: criar prova, gerar gabarito, emitir folhas com QR Code, corrigir por upload ou câmera e visualizar relatórios.</p><h2 class="h4 atlas-title mt-4">Mecânica principal</h2><ol><li>O professor cria uma avaliação.</li><li>O sistema gera o gabarito oficial.</li><li>As folhas de resposta são personalizadas por aluno.</li><li>O QR Code identifica aluno, prova e tipo da folha.</li><li>O OpenCV lê as marcações e calcula a nota.</li><li>O relatório mostra desempenho individual e da turma.</li></ol></div></div></div>
+  <div class="col-lg-5"><div class="card atlas-card"><div class="card-body p-4"><h2 class="h4 atlas-title">Tecnologias</h2><ul class="mb-0"><li>Python Flask</li><li>SQLite compatível com Render</li><li>OpenCV e NumPy</li><li>Bootstrap 5</li><li>HTML5 Camera / Canvas</li><li>QR Code</li><li>Gemini como apoio opcional</li></ul></div></div></div>
+  <div class="col-12"><div class="card atlas-card"><div class="card-body p-4"><h2 class="h4 atlas-title">Diferenciais</h2><div class="row g-3"><div class="col-md-3"><div class="metric h-100"><strong>IA mínima</strong><div class="small-muted">A IA apoia a criação, mas o sistema não depende dela para corrigir.</div></div></div><div class="col-md-3"><div class="metric h-100"><strong>Correção por câmera</strong><div class="small-muted">Scan em tempo real com controle de duplicidade.</div></div></div><div class="col-md-3"><div class="metric h-100"><strong>Provas Tipo A/B</strong><div class="small-muted">Alternativas embaralhadas por folha para reduzir cola.</div></div></div><div class="col-md-3"><div class="metric h-100"><strong>Organização do TCC</strong><div class="small-muted">Anotações, diário, checklist, cronograma e testes.</div></div></div></div></div></div></div>
+</div>
+{% endblock %}

@@ -23,13 +23,43 @@
                     {% if g.professor %}
                     <li class="nav-item"><a class="nav-link" href="{{ url_for('home') }}">Painel</a></li>
                     <li class="nav-item"><a class="nav-link" href="{{ url_for('scan_tempo_real') }}">Scan</a></li>
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('ferramentas_painel') }}">Ferramentas</a></li>
+                    <li class="nav-item"><button class="btn btn-sm btn-outline-light" type="button" data-bs-toggle="offcanvas" data-bs-target="#menuAtlas">☰ Menu</button></li>
                     <li class="nav-item"><span class="nav-link small">{{ g.professor.nome }}</span></li>
-                    <li class="nav-item"><a class="btn btn-sm btn-outline-light" href="{{ url_for('logout') }}">Sair</a></li>
+                    <li class="nav-item"><a class="btn btn-sm btn-light" href="{{ url_for('logout') }}">Sair</a></li>
                     {% endif %}
                 </ul>
             </div>
         </div>
     </nav>
+
+    {% if g.professor %}
+    <div class="offcanvas offcanvas-start no-print" tabindex="-1" id="menuAtlas">
+        <div class="offcanvas-header atlas-offcanvas-header">
+            <div>
+                <h5 class="offcanvas-title mb-0">Atlas</h5>
+                <div class="small opacity-75">Ferramentas rápidas</div>
+            </div>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas"></button>
+        </div>
+        <div class="offcanvas-body">
+            <div class="list-group list-group-flush atlas-menu-list">
+                <a class="list-group-item list-group-item-action" href="{{ url_for('home') }}">🏠 Painel principal</a>
+                <a class="list-group-item list-group-item-action" href="{{ url_for('scan_tempo_real') }}">📷 Scan em tempo real</a>
+                <a class="list-group-item list-group-item-action" href="{{ url_for('anotacoes') }}">📝 Anotações</a>
+                <a class="list-group-item list-group-item-action" href="{{ url_for('diario_bordo') }}">📓 Diário de bordo</a>
+                <a class="list-group-item list-group-item-action" href="{{ url_for('checklist_tcc') }}">✅ Checklist do TCC</a>
+                <a class="list-group-item list-group-item-action" href="{{ url_for('cronograma') }}">🗂️ Cronograma / Kanban</a>
+                <a class="list-group-item list-group-item-action" href="{{ url_for('lista_exercicios') }}">📄 Lista de exercícios</a>
+                <a class="list-group-item list-group-item-action" href="{{ url_for('importar_prova_antiga') }}">📥 Importar prova antiga</a>
+                <a class="list-group-item list-group-item-action" href="{{ url_for('identificacao_assistida') }}">🔎 Identificação assistida</a>
+                <a class="list-group-item list-group-item-action" href="{{ url_for('central_testes') }}">🧪 Central de testes</a>
+                <a class="list-group-item list-group-item-action" href="{{ url_for('encerramento_ano_letivo') }}">🗄️ Encerramento de ano</a>
+                <a class="list-group-item list-group-item-action" href="{{ url_for('sobre_atlas') }}">ℹ️ Sobre o Atlas</a>
+            </div>
+        </div>
+    </div>
+    {% endif %}
 
     <main class="container py-4 py-lg-5">
         {% with messages = get_flashed_messages(with_categories=true) %}

@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Atlas - Pré-teste de impressão{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+  <div>
+    <h1 class="atlas-title">Pré-teste de impressão</h1>
+    <p class="atlas-subtitle mb-0">{{ avaliacao.titulo }} · confirme QR Code e marcadores antes de imprimir para a turma toda.</p>
+  </div>
+  <a class="btn btn-outline-dark" href="{{ url_for('ver_avaliacao', avaliacao_id=avaliacao.id) }}">Voltar</a>
+</div>
+<div class="row g-4">
+  <div class="col-lg-7">
+    <div class="card atlas-card"><div class="card-body p-4">
+      <h2 class="h4 atlas-title">Teste rápido por câmera</h2>
+      <p class="small-muted">Mostre uma folha recém-impressa em branco para a câmera. O Atlas verifica se o QR Code e os 4 marcadores de canto foram impressos corretamente.</p>
+      <video id="video" class="w-100 rounded border bg-dark" autoplay playsinline muted></video>
+      <canvas id="canvas" class="d-none"></canvas>
+      <div class="d-flex flex-wrap gap-2 mt-3">
+        <button id="btnCamera" class="btn btn-atlas" type="button">Abrir câmera</button>
+        <button id="btnTestar" class="btn btn-outline-primary" type="button" disabled>Testar folha</button>
+        <button id="btnParar" class="btn btn-outline-danger" type="button">Desligar câmera</button>
+      </div>
+    </div></div>
+  </div>
+  <div class="col-lg-5">
+    <div class="card atlas-card mb-4"><div class="card-body p-4">
+      <h2 class="h4 atlas-title">Ou envie uma foto</h2>
+      <form id="formUpload" enctype="multipart/form-data">
+        <input class="form-control mb-3" type="file" name="folha" accept="image/*" required>
+        <button class="btn btn-outline-primary w-100">Testar imagem</button>
+      </form>
+    </div></div>
+    <div id="resultado" class="alert alert-secondary">Aguardando teste.</div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+let stream = null;
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const resultado = document.getElementById('resultado');
+function mostrar(ok, msg){ resultado.className = 'alert ' + (ok ? 'alert-success':'alert-warning'); resultado.textContent = msg; }
+async function abrirCamera(){
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}, audio:false});
+    video.srcObject = stream; document.getElementById('btnTestar').disabled = false;
+  }catch(e){ mostrar(false, 'Não consegui abrir a câmera: ' + e.message); }
+}
+function pararCamera(){ if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; } video.srcObject=null; document.getElementById('btnTestar').disabled=true; }
+async function testarFrame(){
+  if(!stream) return;
+  canvas.width = video.videoWidth || 1280; canvas.height = video.videoHeight || 720;
+  canvas.getContext('2d').drawImage(video,0,0,canvas.width,canvas.height);
+  const imagem = canvas.toDataURL('image/jpeg', 0.85);
+  const resp = await fetch('{{ url_for('api_preteste_folha') }}', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({imagem})});
+  const dados = await resp.json(); mostrar(!!dados.ok, dados.mensagem || 'Teste concluído.');
+}
+document.getElementById('btnCamera').onclick = abrirCamera;
+document.getElementById('btnParar').onclick = pararCamera;
+document.getElementById('btnTestar').onclick = testarFrame;
+document.getElementById('formUpload').onsubmit = async (ev)=>{ ev.preventDefault(); const resp = await fetch('{{ url_for('api_preteste_folha') }}', {method:'POST', body:new FormData(ev.target)}); const dados=await resp.json(); mostrar(!!dados.ok, dados.mensagem || 'Teste concluído.'); };
+window.addEventListener('beforeunload', pararCamera); document.addEventListener('visibilitychange', ()=>{ if(document.hidden) pararCamera(); });
+</script>
+{% endblock %}

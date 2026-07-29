@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Atlas - Central de Testes{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-4">
+  <div><h1 class="atlas-title h2 mb-1">Central de testes</h1><p class="small-muted mb-0">Verifique partes críticas do Atlas sem passar pelo fluxo completo.</p></div>
+  <a class="btn btn-outline-secondary" href="{{ url_for('ferramentas_painel') }}">Voltar</a>
+</div>
+<div class="row g-4">
+  {% for teste, titulo, desc in [('banco','Banco de dados','Verifica conexão e tabelas'),('opencv','OpenCV','Confere se cv2 e NumPy carregam'),('pdf','PDF','Confere ReportLab'),('qr','QR Code','Gera um QR em memória'),('ia','IA/Gemini','Confere variáveis sem consumir cota')] %}
+  <div class="col-md-6 col-xl-4"><div class="card atlas-card h-100"><div class="card-body p-4"><h2 class="h5 atlas-title">{{ titulo }}</h2><p class="small-muted">{{ desc }}</p><button class="btn btn-outline-primary" onclick="rodarTeste('{{ teste }}', this)">Testar</button><div class="mt-3 small" id="res-{{ teste }}"></div></div></div></div>
+  {% endfor %}
+  <div class="col-md-6 col-xl-4"><div class="card atlas-card h-100"><div class="card-body p-4"><h2 class="h5 atlas-title">Câmera</h2><p class="small-muted">Testa permissão da câmera no navegador e desliga em seguida.</p><button class="btn btn-outline-primary" onclick="testarCamera(this)">Testar câmera</button><video id="videoTeste" class="w-100 mt-3 rounded-4 d-none" autoplay playsinline muted></video><div class="mt-3 small" id="res-camera"></div></div></div></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function rodarTeste(teste, btn){
+  const alvo = document.getElementById('res-' + teste);
+  btn.disabled = true; alvo.innerHTML = '<span class="text-muted">Testando...</span>';
+  try {
+    const r = await fetch('/api/testes/' + teste);
+    const data = await r.json();
+    alvo.innerHTML = `<div class="alert ${data.ok ? 'alert-success':'alert-warning'} py-2 mb-0">${data.mensagem}</div>`;
+  } catch(e){ alvo.innerHTML = `<div class="alert alert-danger py-2 mb-0">${e}</div>`; }
+  btn.disabled = false;
+}
+async function testarCamera(btn){
+  const alvo = document.getElementById('res-camera'); const video = document.getElementById('videoTeste');
+  btn.disabled = true; alvo.innerHTML = '<span class="text-muted">Solicitando permissão...</span>';
+  let stream = null;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({video: {facingMode: {ideal: 'environment'}}, audio: false});
+    video.srcObject = stream; video.classList.remove('d-none');
+    alvo.innerHTML = '<div class="alert alert-success py-2 mb-0">Câmera funcionando. O teste será desligado em 3 segundos.</div>';
+    setTimeout(()=>{ stream.getTracks().forEach(t=>t.stop()); video.srcObject=null; video.classList.add('d-none'); btn.disabled=false; }, 3000);
+  } catch(e){ alvo.innerHTML = `<div class="alert alert-danger py-2 mb-0">Não consegui abrir a câmera: ${e.message || e}</div>`; btn.disabled=false; }
+}
+</script>
+{% endblock %}

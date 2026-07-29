@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Atlas - Identificação assistida{% endblock %}
+{% block content %}
+<div class="mb-4"><h1 class="atlas-title">Identificação Manual Assistida</h1><p class="atlas-subtitle">Use quando o QR Code falhar. O Atlas tenta ler o cabeçalho por OCR opcional e sugere alunos prováveis.</p></div>
+<div class="card atlas-card mb-4"><div class="card-body p-4">
+<form method="post" enctype="multipart/form-data" class="row g-3 align-items-end">
+  <div class="col-md-4"><label class="form-label">Avaliação</label><select class="form-select" name="avaliacao_id"><option value="">Não informar</option>{% for a in avaliacoes %}<option value="{{ a.id }}">{{ a.titulo }}</option>{% endfor %}</select></div>
+  <div class="col-md-5"><label class="form-label">Foto da folha</label><input class="form-control" type="file" name="folha" accept="image/*" required></div>
+  <div class="col-md-3"><button class="btn btn-atlas w-100">Analisar</button></div>
+</form>
+</div></div>
+<div class="card atlas-card"><div class="card-body p-4">
+<h2 class="h4 atlas-title">Pendências recentes</h2>
+<div class="table-responsive"><table class="table align-middle"><thead><tr><th>ID</th><th>Status</th><th>Texto detectado</th><th>Sugestões</th></tr></thead><tbody>
+{% for p in pendencias %}{% set sugestoes = carregar_json_seguro(p.sugestoes_json, []) %}<tr><td>#{{ p.id }}</td><td><span class="badge text-bg-secondary">{{ p.status }}</span></td><td><small>{{ p.texto_detectado[:160] if p.texto_detectado else 'Sem OCR disponível' }}</small></td><td>{% for s in sugestoes %}<form method="post" action="{{ url_for('confirmar_identificacao_assistida', pendencia_id=p.id) }}" class="d-inline"><input type="hidden" name="aluno_id" value="{{ s.id }}"><button class="btn btn-sm btn-outline-primary mb-1">{{ s.nome }} · {{ s.turma }}</button></form> {% endfor %}</td></tr>{% else %}<tr><td colspan="4" class="text-muted">Nenhuma pendência.</td></tr>{% endfor %}
+</tbody></table></div>
+</div></div>
+{% endblock %}

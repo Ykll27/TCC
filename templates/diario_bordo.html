@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Atlas - Diário de Bordo{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-4">
+  <div><h1 class="atlas-title h2 mb-1">Diário de bordo</h1><p class="small-muted mb-0">Registre o que foi feito, por quem e em qual estado ficou.</p></div>
+  <a class="btn btn-outline-secondary" href="{{ url_for('ferramentas_painel') }}">Voltar</a>
+</div>
+<div class="card atlas-card mb-4"><div class="card-body p-4">
+  <form method="POST" class="row g-3 align-items-end">
+    <div class="col-md-2"><label class="form-label">Data</label><input type="date" class="form-control" name="data" value="{{ hoje }}"></div>
+    <div class="col-md-4"><label class="form-label">Atividade</label><input class="form-control" name="atividade" placeholder="Ex: Corrigimos duplicidade no Scan" required></div>
+    <div class="col-md-2"><label class="form-label">Responsável</label><input class="form-control" name="responsavel" placeholder="Nome"></div>
+    <div class="col-md-2"><label class="form-label">Status</label><select class="form-select" name="status"><option value="feito">Feito</option><option value="andamento">Em andamento</option><option value="pendente">Pendente</option><option value="travado">Travado</option></select></div>
+    <div class="col-md-2"><button class="btn btn-atlas w-100">Adicionar</button></div>
+    <div class="col-12"><label class="form-label">Observações</label><textarea class="form-control" name="observacoes" rows="2"></textarea></div>
+  </form>
+</div></div>
+<div class="timeline-list d-grid gap-3">
+{% for r in registros %}
+  <div class="card atlas-card"><div class="card-body p-4">
+    <div class="d-flex justify-content-between gap-2"><div><span class="badge text-bg-primary">{{ r.data }}</span> <span class="badge text-bg-light">{{ r.status }}</span>{% if r.responsavel %} <span class="small-muted">Responsável: {{ r.responsavel }}</span>{% endif %}</div><form method="POST" action="{{ url_for('excluir_diario', registro_id=r.id) }}" onsubmit="return confirm('Remover registro?')"><button class="btn btn-sm btn-outline-danger">Excluir</button></form></div>
+    <h2 class="h5 mt-3">{{ r.atividade }}</h2>
+    {% if r.observacoes %}<p class="mb-0" style="white-space:pre-wrap">{{ r.observacoes }}</p>{% endif %}
+  </div></div>
+{% else %}<div class="alert alert-info">Nenhum registro no diário.</div>{% endfor %}
+</div>
+{% endblock %}

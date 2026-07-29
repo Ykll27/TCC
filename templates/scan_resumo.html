@@ -11,6 +11,17 @@
     <div class="col-md-3"><div class="metric"><div class="small-muted">Revisão</div><div class="value">{{ sessao.total_revisao }}</div></div></div>
     <div class="col-md-3"><div class="metric"><div class="small-muted">Tempo médio</div><div class="value">{{ sessao.tempo_medio_ms|round|int }} ms</div></div></div>
 </div>
+
+<div class="card atlas-card mb-4"><div class="card-body p-4">
+  <h2 class="atlas-title h4">Faltosos / folhas não corrigidas</h2>
+  {% if faltosos %}
+    <div class="alert alert-warning">Scan concluído. {{ sessao.total_sucesso }} folha(s) corrigida(s). Alunos faltosos: {{ faltosos|length }}.</div>
+    <div class="d-flex flex-wrap gap-2">{% for f in faltosos %}<span class="badge text-bg-warning p-2">{{ f.aluno_nome }} · {{ f.turma }}</span>{% endfor %}</div>
+  {% else %}
+    <div class="alert alert-success mb-0">Nenhum faltoso detectado para essa avaliação.</div>
+  {% endif %}
+</div></div>
+
 <div class="card atlas-card"><div class="card-body p-4">
     <h2 class="atlas-title h4">Leituras</h2>
     <div class="table-responsive"><table class="table table-hover align-middle"><thead><tr><th>Aluno</th><th>Prova</th><th>Nota</th><th>Tempo</th><th>Status</th><th>Mensagem</th></tr></thead><tbody>{% for l in leituras %}<tr><td>{{ l.aluno_nome or 'Não identificado' }}</td><td>{{ l.prova_titulo }}</td><td><strong>{{ l.nota_percentual or '-' }}%</strong></td><td>{{ l.latencia_ms|round|int if l.latencia_ms else '-' }} ms</td><td><span class="badge {% if l.status == 'ok' %}text-bg-success{% else %}text-bg-warning{% endif %}">{{ l.status }}</span></td><td>{{ l.mensagem }}</td></tr>{% else %}<tr><td colspan="6" class="text-muted">Nenhuma leitura.</td></tr>{% endfor %}</tbody></table></div>

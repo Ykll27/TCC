@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Atlas - Checklist do TCC{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-4">
+  <div><h1 class="atlas-title h2 mb-1">Checklist do TCC</h1><p class="small-muted mb-0">Controle as partes da documentação, testes e apresentação.</p></div>
+  <a class="btn btn-outline-secondary" href="{{ url_for('ferramentas_painel') }}">Voltar</a>
+</div>
+<div class="card atlas-card mb-4"><div class="card-body p-4">
+  <div class="d-flex flex-wrap justify-content-between gap-2 mb-2"><strong>Progresso: {{ concluidos }}/{{ total }}</strong><strong>{{ progresso }}%</strong></div>
+  <div class="progress" style="height:12px"><div class="progress-bar" style="width:{{ progresso }}%"></div></div>
+</div></div>
+<div class="card atlas-card mb-4"><div class="card-body p-4">
+  <form class="row g-2" method="POST"><div class="col-md-8"><input class="form-control" name="titulo" placeholder="Novo item do checklist" required></div><div class="col-md-3"><input class="form-control" name="categoria" value="TCC"></div><div class="col-md-1"><button class="btn btn-atlas w-100">+</button></div></form>
+</div></div>
+<div class="card atlas-card"><div class="card-body p-0"><div class="list-group list-group-flush">
+{% for item in itens %}
+  <div class="list-group-item d-flex align-items-center justify-content-between gap-2 py-3 px-4 {% if item.concluido %}bg-light{% endif %}">
+    <div class="d-flex align-items-center gap-3"><form method="POST" action="{{ url_for('toggle_checklist', item_id=item.id) }}"><button class="btn btn-sm {% if item.concluido %}btn-success{% else %}btn-outline-secondary{% endif %}" title="Alternar">{% if item.concluido %}✓{% else %}○{% endif %}</button></form><div><div class="{% if item.concluido %}text-decoration-line-through text-muted{% endif %}">{{ item.titulo }}</div><div class="small-muted">{{ item.categoria }}</div></div></div>
+    <form method="POST" action="{{ url_for('excluir_checklist', item_id=item.id) }}" onsubmit="return confirm('Excluir item?')"><button class="btn btn-sm btn-outline-danger">Excluir</button></form>
+  </div>
+{% else %}<div class="p-4 text-muted">Nenhum item.</div>{% endfor %}
+</div></div></div>
+{% endblock %}

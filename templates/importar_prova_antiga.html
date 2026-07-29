@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Atlas - Importar prova antiga{% endblock %}
+{% block content %}
+<div class="mb-4"><h1 class="atlas-title">Importador de provas antigas</h1><p class="atlas-subtitle">Cole uma prova antiga do Word/PDF. O Atlas tenta separar questões e alternativas automaticamente para alimentar o banco local.</p></div>
+<div class="card atlas-card"><div class="card-body p-4">
+<form method="post">
+  <div class="row g-3 mb-3">
+    <div class="col-md-4"><label class="form-label">Matéria</label><input class="form-control" name="materia" required></div>
+    <div class="col-md-4"><label class="form-label">Tema</label><input class="form-control" name="tema"></div>
+    <div class="col-md-2"><label class="form-label">Dificuldade</label><select class="form-select" name="dificuldade"><option value="facil">Fácil</option><option value="medio" selected>Médio</option><option value="dificil">Difícil</option></select></div>
+    <div class="col-md-2"><label class="form-label">Correta padrão</label><select class="form-select" name="correta_padrao">{% for a in ['A','B','C','D','E'] %}<option value="{{ a }}">{{ a }}</option>{% endfor %}</select></div>
+  </div>
+  <label class="form-label">Texto da prova</label>
+  <textarea class="form-control" name="texto_prova" rows="18" placeholder="1) Enunciado...&#10;A) Alternativa...&#10;B) Alternativa..." required></textarea>
+  <div class="alert alert-warning mt-3">Depois de importar, revise o gabarito das questões. O importador separa a estrutura, mas não adivinha a resposta correta com segurança.</div>
+  <button class="btn btn-atlas">Importar para o banco local</button>
+</form>
+</div></div>
+{% endblock %}

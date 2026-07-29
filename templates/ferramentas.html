@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Atlas - Ferramentas{% endblock %}
+{% block content %}
+<div class="atlas-hero p-4 p-lg-5 mb-4">
+  <span class="badge badge-soft rounded-pill mb-3">Organização · TCC · Manutenção</span>
+  <h1 class="atlas-title h2 mb-2">Ferramentas do Atlas</h1>
+  <p class="atlas-subtitle mb-0">Recursos auxiliares para organizar o TCC, registrar decisões, acompanhar tarefas e testar partes críticas do sistema.</p>
+</div>
+<div class="row g-4">
+  <div class="col-md-6 col-xl-4"><a class="card atlas-card h-100 text-decoration-none text-dark" href="{{ url_for('anotacoes') }}"><div class="card-body p-4"><div class="fs-1">📝</div><h2 class="h5 atlas-title">Anotações</h2><p class="small-muted">Registre observações de avaliações, turmas, bugs e ideias.</p><span class="badge text-bg-primary">{{ contadores.anotacoes }} anotação(ões)</span></div></a></div>
+  <div class="col-md-6 col-xl-4"><a class="card atlas-card h-100 text-decoration-none text-dark" href="{{ url_for('diario_bordo') }}"><div class="card-body p-4"><div class="fs-1">📓</div><h2 class="h5 atlas-title">Diário de bordo</h2><p class="small-muted">Guarde o histórico do desenvolvimento do projeto.</p><span class="badge text-bg-info">{{ contadores.diario }} registro(s)</span></div></a></div>
+  <div class="col-md-6 col-xl-4"><a class="card atlas-card h-100 text-decoration-none text-dark" href="{{ url_for('checklist_tcc') }}"><div class="card-body p-4"><div class="fs-1">✅</div><h2 class="h5 atlas-title">Checklist do TCC</h2><p class="small-muted">Acompanhe documentação, apresentação e entrega.</p><span class="badge text-bg-warning">{{ contadores.checklist_pendentes }} pendente(s)</span></div></a></div>
+  <div class="col-md-6 col-xl-4"><a class="card atlas-card h-100 text-decoration-none text-dark" href="{{ url_for('cronograma') }}"><div class="card-body p-4"><div class="fs-1">🗂️</div><h2 class="h5 atlas-title">Cronograma / Kanban</h2><p class="small-muted">Organize tarefas por status: a fazer, andamento, concluído e travado.</p><span class="badge text-bg-secondary">{{ contadores.tarefas_abertas }} aberta(s)</span></div></a></div>
+  <div class="col-md-6 col-xl-4"><a class="card atlas-card h-100 text-decoration-none text-dark" href="{{ url_for('central_testes') }}"><div class="card-body p-4"><div class="fs-1">🧪</div><h2 class="h5 atlas-title">Central de testes</h2><p class="small-muted">Teste banco, câmera, OpenCV, PDF, QR Code e configuração da IA.</p></div></a></div>
+  <div class="col-md-6 col-xl-4"><a class="card atlas-card h-100 text-decoration-none text-dark" href="{{ url_for('sobre_atlas') }}"><div class="card-body p-4"><div class="fs-1">ℹ️</div><h2 class="h5 atlas-title">Sobre o Atlas</h2><p class="small-muted">Resumo técnico e pedagógico do sistema para apresentação.</p></div></a></div>
+
+  <div class="col-md-6 col-xl-4"><a class="card atlas-card h-100 text-decoration-none text-dark" href="{{ url_for('lista_exercicios') }}"><div class="card-body p-4"><div class="fs-1">📄</div><h2 class="h5 atlas-title">Listas de exercícios</h2><p class="small-muted">Monte PDF de revisão usando o banco local de questões.</p></div></a></div>
+  <div class="col-md-6 col-xl-4"><a class="card atlas-card h-100 text-decoration-none text-dark" href="{{ url_for('importar_prova_antiga') }}"><div class="card-body p-4"><div class="fs-1">📥</div><h2 class="h5 atlas-title">Importar prova antiga</h2><p class="small-muted">Cole uma prova do Word/PDF para separar questões automaticamente.</p></div></a></div>
+  <div class="col-md-6 col-xl-4"><a class="card atlas-card h-100 text-decoration-none text-dark" href="{{ url_for('identificacao_assistida') }}"><div class="card-body p-4"><div class="fs-1">🔎</div><h2 class="h5 atlas-title">Identificação assistida</h2><p class="small-muted">Ajuda a identificar folhas quando o QR Code falha.</p></div></a></div>
+  <div class="col-md-6 col-xl-4"><a class="card atlas-card h-100 text-decoration-none text-dark" href="{{ url_for('encerramento_ano_letivo') }}"><div class="card-body p-4"><div class="fs-1">🗄️</div><h2 class="h5 atlas-title">Encerramento de ano</h2><p class="small-muted">Arquive avaliações antigas e deixe o painel limpo.</p></div></a></div>
+</div>
+{% endblock %}

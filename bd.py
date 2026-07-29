@@ -125,9 +125,30 @@ def iniciar_banco():
                 total_questoes INTEGER NOT NULL,
                 gabarito_json TEXT NOT NULL,
                 qr_arquivo TEXT,
+                tipo_prova TEXT DEFAULT 'A',
+                mapa_alternativas_json TEXT DEFAULT '{}',
                 criado_em TEXT NOT NULL,
                 FOREIGN KEY (professor_id) REFERENCES professores(id),
                 FOREIGN KEY (avaliacao_id) REFERENCES avaliacoes(id),
+                FOREIGN KEY (aluno_id) REFERENCES alunos(id)
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS folhas_resposta (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                professor_id INTEGER,
+                avaliacao_id INTEGER,
+                prova_id INTEGER NOT NULL UNIQUE,
+                aluno_id INTEGER NOT NULL,
+                tipo_prova TEXT DEFAULT 'A',
+                mapa_alternativas_json TEXT DEFAULT '{}',
+                criado_em TEXT NOT NULL,
+                FOREIGN KEY (professor_id) REFERENCES professores(id),
+                FOREIGN KEY (avaliacao_id) REFERENCES avaliacoes(id),
+                FOREIGN KEY (prova_id) REFERENCES provas(id),
                 FOREIGN KEY (aluno_id) REFERENCES alunos(id)
             )
             """
@@ -236,30 +257,205 @@ def iniciar_banco():
             """
         )
 
+
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS anotacoes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                professor_id INTEGER NOT NULL,
+                titulo TEXT NOT NULL,
+                conteudo TEXT NOT NULL,
+                categoria TEXT DEFAULT 'Geral',
+                avaliacao_id INTEGER,
+                turma TEXT,
+                importante INTEGER DEFAULT 0,
+                criado_em TEXT NOT NULL,
+                atualizado_em TEXT,
+                FOREIGN KEY (professor_id) REFERENCES professores(id),
+                FOREIGN KEY (avaliacao_id) REFERENCES avaliacoes(id)
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS diario_bordo (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                professor_id INTEGER NOT NULL,
+                data TEXT NOT NULL,
+                atividade TEXT NOT NULL,
+                responsavel TEXT,
+                status TEXT DEFAULT 'feito',
+                observacoes TEXT,
+                criado_em TEXT NOT NULL,
+                atualizado_em TEXT,
+                FOREIGN KEY (professor_id) REFERENCES professores(id)
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS checklist_tcc (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                professor_id INTEGER NOT NULL,
+                titulo TEXT NOT NULL,
+                categoria TEXT DEFAULT 'TCC',
+                concluido INTEGER DEFAULT 0,
+                ordem INTEGER DEFAULT 0,
+                criado_em TEXT NOT NULL,
+                atualizado_em TEXT,
+                FOREIGN KEY (professor_id) REFERENCES professores(id)
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS cronograma_tarefas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                professor_id INTEGER NOT NULL,
+                titulo TEXT NOT NULL,
+                descricao TEXT,
+                responsavel TEXT,
+                status TEXT DEFAULT 'afazer',
+                prioridade TEXT DEFAULT 'media',
+                prazo TEXT,
+                criado_em TEXT NOT NULL,
+                atualizado_em TEXT,
+                FOREIGN KEY (professor_id) REFERENCES professores(id)
+            )
+            """
+        )
+
+
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS questoes_anuladas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                professor_id INTEGER NOT NULL,
+                avaliacao_id INTEGER NOT NULL,
+                questao INTEGER NOT NULL,
+                motivo TEXT,
+                criado_em TEXT NOT NULL,
+                UNIQUE(professor_id, avaliacao_id, questao),
+                FOREIGN KEY (professor_id) REFERENCES professores(id),
+                FOREIGN KEY (avaliacao_id) REFERENCES avaliacoes(id)
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS listas_exercicios (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                professor_id INTEGER NOT NULL,
+                titulo TEXT NOT NULL,
+                filtros_json TEXT DEFAULT '{}',
+                questoes_json TEXT NOT NULL,
+                incluir_gabarito INTEGER DEFAULT 0,
+                arquivo_pdf TEXT,
+                criado_em TEXT NOT NULL,
+                FOREIGN KEY (professor_id) REFERENCES professores(id)
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS identificacoes_pendentes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                professor_id INTEGER NOT NULL,
+                avaliacao_id INTEGER,
+                prova_base_id INTEGER,
+                imagem_arquivo TEXT,
+                texto_detectado TEXT,
+                sugestoes_json TEXT DEFAULT '[]',
+                status TEXT DEFAULT 'pendente',
+                aluno_id_confirmado INTEGER,
+                criado_em TEXT NOT NULL,
+                atualizado_em TEXT,
+                FOREIGN KEY (professor_id) REFERENCES professores(id),
+                FOREIGN KEY (avaliacao_id) REFERENCES avaliacoes(id),
+                FOREIGN KEY (prova_base_id) REFERENCES provas(id),
+                FOREIGN KEY (aluno_id_confirmado) REFERENCES alunos(id)
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS arquivos_ano_letivo (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                professor_id INTEGER NOT NULL,
+                ano_letivo TEXT NOT NULL,
+                descricao TEXT,
+                totais_json TEXT DEFAULT '{}',
+                criado_em TEXT NOT NULL,
+                FOREIGN KEY (professor_id) REFERENCES professores(id)
+            )
+            """
+        )
+
         # Migrações seguras para bancos antigos.
-        for tabela in ["alunos", "avaliacoes", "provas", "resultados", "questoes_cache", "tarefas_ia", "sessoes_scan"]:
+        for tabela in ["alunos", "avaliacoes", "provas", "folhas_resposta", "resultados", "questoes_cache", "tarefas_ia", "sessoes_scan", "anotacoes", "diario_bordo", "checklist_tcc", "cronograma_tarefas", "questoes_anuladas", "listas_exercicios", "identificacoes_pendentes", "arquivos_ano_letivo"]:
             _adicionar_coluna_se_nao_existir(conn, tabela, "professor_id", "INTEGER")
         _adicionar_coluna_se_nao_existir(conn, "provas", "avaliacao_id", "INTEGER")
         _adicionar_coluna_se_nao_existir(conn, "provas", "qr_arquivo", "TEXT")
+        _adicionar_coluna_se_nao_existir(conn, "provas", "tipo_prova", "TEXT DEFAULT 'A'")
+        _adicionar_coluna_se_nao_existir(conn, "provas", "mapa_alternativas_json", "TEXT DEFAULT '{}'")
         _adicionar_coluna_se_nao_existir(conn, "resultados", "aluno_id", "INTEGER")
         _adicionar_coluna_se_nao_existir(conn, "resultados", "status_confianca", "TEXT DEFAULT 'confiavel'")
         _adicionar_coluna_se_nao_existir(conn, "avaliacoes", "status_revisao", "TEXT DEFAULT 'rascunho'")
         _adicionar_coluna_se_nao_existir(conn, "avaliacoes", "atualizado_em", "TEXT")
         _adicionar_coluna_se_nao_existir(conn, "questoes_cache", "habilidade", "TEXT")
 
+
+        for tabela in ["alunos", "avaliacoes", "provas", "resultados", "questoes_cache", "anotacoes", "diario_bordo", "checklist_tcc", "cronograma_tarefas"]:
+            _adicionar_coluna_se_nao_existir(conn, tabela, "ano_letivo", "TEXT")
+            _adicionar_coluna_se_nao_existir(conn, tabela, "arquivado", "INTEGER DEFAULT 0")
+
         professor_padrao = _garantir_professor_padrao(conn)
-        for tabela in ["alunos", "avaliacoes", "provas", "resultados", "questoes_cache", "tarefas_ia", "sessoes_scan"]:
+        for tabela in ["alunos", "avaliacoes", "provas", "folhas_resposta", "resultados", "questoes_cache", "tarefas_ia", "sessoes_scan", "anotacoes", "diario_bordo", "checklist_tcc", "cronograma_tarefas", "questoes_anuladas", "listas_exercicios", "identificacoes_pendentes", "arquivos_ano_letivo"]:
             if _tabela_existe(conn, tabela) and "professor_id" in _colunas_tabela(conn, tabela):
                 conn.execute(f"UPDATE {tabela} SET professor_id = ? WHERE professor_id IS NULL", (professor_padrao,))
 
         conn.execute("CREATE INDEX IF NOT EXISTS idx_alunos_prof_turma ON alunos (professor_id, turma, nome)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_avaliacoes_prof ON avaliacoes (professor_id, id DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_provas_prof_avaliacao ON provas (professor_id, avaliacao_id, aluno_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_folhas_resposta_lookup ON folhas_resposta (professor_id, avaliacao_id, aluno_id, prova_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_resultados_prof ON resultados (professor_id, prova_id, criado_em)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_questoes_cache_busca ON questoes_cache (professor_id, materia, tema, modelo, aprovado)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_tarefas_ia_status ON tarefas_ia (status, criado_em)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sessoes_scan_status ON sessoes_scan (professor_id, status, criado_em)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_leituras_scan_sessao ON leituras_scan (sessao_id, aluno_id, prova_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_anotacoes_prof ON anotacoes (professor_id, importante DESC, atualizado_em DESC, criado_em DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_diario_prof_data ON diario_bordo (professor_id, data DESC, id DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_checklist_prof ON checklist_tcc (professor_id, categoria, ordem, id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_cronograma_prof_status ON cronograma_tarefas (professor_id, status, prazo, id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_anuladas_avaliacao ON questoes_anuladas (professor_id, avaliacao_id, questao)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_listas_prof ON listas_exercicios (professor_id, criado_em DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ident_pendentes_prof ON identificacoes_pendentes (professor_id, status, criado_em DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_arquivos_ano_prof ON arquivos_ano_letivo (professor_id, ano_letivo)")
+
+
+        # Sincroniza folhas_resposta para provas antigas. A tabela provas continua
+        # sendo a estrutura principal do projeto atual, enquanto folhas_resposta
+        # documenta e armazena o mapa anti-cola por folha/aluno.
+        if _tabela_existe(conn, "folhas_resposta"):
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO folhas_resposta
+                    (professor_id, avaliacao_id, prova_id, aluno_id, tipo_prova, mapa_alternativas_json, criado_em)
+                SELECT professor_id, avaliacao_id, id, aluno_id,
+                       COALESCE(tipo_prova, 'A'),
+                       COALESCE(mapa_alternativas_json, '{}'),
+                       COALESCE(criado_em, datetime('now'))
+                FROM provas
+                """
+            )
 
         alunos = [
             ("Ana Clara Souza", "MAT001", "3º Ano A"),

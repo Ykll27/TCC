@@ -27,3 +27,12 @@ body { background: var(--atlas-bg); color: #152238; }
 .drop-area.dragover { background: #e5f4ff; border-color: var(--atlas-700); }
 .badge-soft { background: #eaf2ff; color: var(--atlas-700); }
 @media print { .no-print { display:none !important; } body { background: white; } .atlas-card { box-shadow: none; border: none; } }
+.atlas-offcanvas-header { background: linear-gradient(135deg, var(--atlas-900), var(--atlas-700)); color: #fff; }
+.atlas-menu-list .list-group-item { border: 0; border-radius: 14px; margin-bottom: .35rem; font-weight: 700; color: #173252; }
+.atlas-menu-list .list-group-item:hover { background: #eaf2ff; color: var(--atlas-700); }
+.kanban-column { border-radius: 22px; background: rgba(255,255,255,.65); border: 1px solid rgba(47,128,237,.12); padding: 1rem; min-height: 240px; }
+.kanban-card { box-shadow: 0 8px 24px rgba(10, 31, 58, .06); }
+.priority-baixa { background: #e9f7ef; color: #0f5132; }
+.priority-media { background: #fff3cd; color: #664d03; }
+.priority-alta { background: #f8d7da; color: #842029; }
+.timeline-list .card { border-left: 6px solid var(--atlas-500); }
