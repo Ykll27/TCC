@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Atlas - Relatórios{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
+  <div><h1 class="atlas-page-title">Relatórios</h1><p class="atlas-page-subtitle mb-0">Acesse notas, faltosos, questões críticas, exportação e devolutivas.</p></div>
+  <a class="btn btn-soft" href="{{ url_for('scan_tempo_real') }}"><i class="bi bi-camera me-1"></i> Corrigir agora</a>
+</div>
+<div class="atlas-panel">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
+    <h2 class="atlas-section-title">Avaliações com relatório</h2>
+    <input class="form-control" style="max-width:380px" data-table-filter="#tabelaRelatorios" placeholder="Buscar relatório">
+  </div>
+  <div class="table-responsive">
+    <table class="table table-hover align-middle" id="tabelaRelatorios">
+      <thead><tr><th>Avaliação</th><th>Folhas</th><th>Corrigidas</th><th>Última nota</th><th class="text-end">Ações</th></tr></thead>
+      <tbody>{% for a in avaliacoes %}<tr data-search-item><td><strong>{{ a.titulo }}</strong><div class="small-muted">{{ a.materias }}</div></td><td>{{ a.total_folhas or 0 }}</td><td>{{ a.total_resultados or 0 }}</td><td>{{ a.ultima_correcao or '-' }}</td><td class="text-end"><a class="btn btn-sm btn-atlas" href="{{ url_for('relatorio_avaliacao', avaliacao_id=a.id) }}">Abrir relatório</a></td></tr>{% else %}<tr><td colspan="5" class="text-muted">Nenhuma avaliação criada.</td></tr>{% endfor %}</tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

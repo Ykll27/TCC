@@ -4,76 +4,103 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{% block title %}Atlas{% endblock %}</title>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" />
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet" />
     <link href="{{ url_for('static', filename='css/atlas.css') }}" rel="stylesheet" />
     {% block head %}{% endblock %}
 </head>
 <body>
-    <nav class="navbar navbar-expand-lg navbar-dark atlas-navbar no-print">
-        <div class="container">
-            <a class="navbar-brand atlas-brand d-flex align-items-center gap-2" href="{{ url_for('home') }}">
-                <span class="atlas-logo">A</span>
-                <span>Atlas</span>
-            </a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarAtlas">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarAtlas">
-                <ul class="navbar-nav ms-auto align-items-lg-center gap-lg-2">
-                    {% if g.professor %}
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('home') }}">Painel</a></li>
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('scan_tempo_real') }}">Scan</a></li>
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('ferramentas_painel') }}">Ferramentas</a></li>
-                    <li class="nav-item"><button class="btn btn-sm btn-outline-light" type="button" data-bs-toggle="offcanvas" data-bs-target="#menuAtlas">☰ Menu</button></li>
-                    <li class="nav-item"><span class="nav-link small">{{ g.professor.nome }}</span></li>
-                    <li class="nav-item"><a class="btn btn-sm btn-light" href="{{ url_for('logout') }}">Sair</a></li>
-                    {% endif %}
-                </ul>
-            </div>
-        </div>
-    </nav>
+{% macro nav_link(endpoint, icon, label, extra='') -%}
+    <a class="atlas-menu-link {% if request.endpoint == endpoint or (extra and extra in request.path) %}active{% endif %}" href="{{ url_for(endpoint) }}">
+        <i class="bi {{ icon }}"></i><span>{{ label }}</span>
+    </a>
+{%- endmacro %}
 
-    {% if g.professor %}
-    <div class="offcanvas offcanvas-start no-print" tabindex="-1" id="menuAtlas">
-        <div class="offcanvas-header atlas-offcanvas-header">
+{% if g.professor %}
+<div class="atlas-layout">
+    <aside class="atlas-sidebar no-print">
+        <div class="atlas-brand-box">
+            <div class="atlas-brand-mark"><i class="bi bi-globe2"></i></div>
             <div>
-                <h5 class="offcanvas-title mb-0">Atlas</h5>
-                <div class="small opacity-75">Ferramentas rápidas</div>
-            </div>
-            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas"></button>
-        </div>
-        <div class="offcanvas-body">
-            <div class="list-group list-group-flush atlas-menu-list">
-                <a class="list-group-item list-group-item-action" href="{{ url_for('home') }}">🏠 Painel principal</a>
-                <a class="list-group-item list-group-item-action" href="{{ url_for('scan_tempo_real') }}">📷 Scan em tempo real</a>
-                <a class="list-group-item list-group-item-action" href="{{ url_for('anotacoes') }}">📝 Anotações</a>
-                <a class="list-group-item list-group-item-action" href="{{ url_for('diario_bordo') }}">📓 Diário de bordo</a>
-                <a class="list-group-item list-group-item-action" href="{{ url_for('checklist_tcc') }}">✅ Checklist do TCC</a>
-                <a class="list-group-item list-group-item-action" href="{{ url_for('cronograma') }}">🗂️ Cronograma / Kanban</a>
-                <a class="list-group-item list-group-item-action" href="{{ url_for('lista_exercicios') }}">📄 Lista de exercícios</a>
-                <a class="list-group-item list-group-item-action" href="{{ url_for('importar_prova_antiga') }}">📥 Importar prova antiga</a>
-                <a class="list-group-item list-group-item-action" href="{{ url_for('identificacao_assistida') }}">🔎 Identificação assistida</a>
-                <a class="list-group-item list-group-item-action" href="{{ url_for('central_testes') }}">🧪 Central de testes</a>
-                <a class="list-group-item list-group-item-action" href="{{ url_for('encerramento_ano_letivo') }}">🗄️ Encerramento de ano</a>
-                <a class="list-group-item list-group-item-action" href="{{ url_for('sobre_atlas') }}">ℹ️ Sobre o Atlas</a>
+                <div class="atlas-brand-title">ATLAS</div>
+                <div class="atlas-brand-subtitle">Gestão de avaliações</div>
             </div>
         </div>
-    </div>
-    {% endif %}
 
-    <main class="container py-4 py-lg-5">
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% for category, message in messages %}
-                <div class="alert alert-{{ category }} alert-dismissible fade show no-print" role="alert">
-                    {{ message }}
-                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                </div>
-            {% endfor %}
-        {% endwith %}
-        {% block content %}{% endblock %}
+        {{ nav_link('home', 'bi-grid-1x2', 'Painel') }}
+
+        <div class="atlas-menu-title">Organização</div>
+        {{ nav_link('estrutura', 'bi-diagram-3', 'Estrutura') }}
+        {{ nav_link('alunos_pagina', 'bi-people', 'Alunos') }}
+
+        <div class="atlas-menu-title">Avaliações</div>
+        {{ nav_link('avaliacoes_pagina', 'bi-file-earmark-text', 'Provas') }}
+        {{ nav_link('gabaritos_pagina', 'bi-list-check', 'Gabaritos') }}
+        {{ nav_link('folhas_pagina', 'bi-ui-checks-grid', 'Folhas') }}
+        {{ nav_link('scan_tempo_real', 'bi-camera', 'Scan') }}
+        {{ nav_link('relatorios_pagina', 'bi-graph-up-arrow', 'Relatórios') }}
+
+        <div class="atlas-menu-title">Ferramentas</div>
+        {{ nav_link('lista_exercicios', 'bi-journal-text', 'Listas') }}
+        {{ nav_link('anotacoes', 'bi-sticky', 'Anotações') }}
+        {{ nav_link('diario_bordo', 'bi-calendar2-week', 'Diário') }}
+        {{ nav_link('checklist_tcc', 'bi-check2-square', 'Checklist') }}
+        {{ nav_link('cronograma', 'bi-kanban', 'Cronograma') }}
+
+        <div class="atlas-menu-title">Sistema</div>
+        {{ nav_link('central_testes', 'bi-wrench-adjustable-circle', 'Central de testes') }}
+        {{ nav_link('encerramento_ano_letivo', 'bi-archive', 'Encerramento') }}
+        <a class="atlas-menu-link danger" href="{{ url_for('logout') }}"><i class="bi bi-box-arrow-left"></i><span>Sair</span></a>
+    </aside>
+
+    <main class="atlas-main">
+        <div class="atlas-topbar no-print">
+            <button class="atlas-icon-btn atlas-mobile-toggle" type="button" data-sidebar-toggle aria-label="Abrir menu"><i class="bi bi-list"></i></button>
+            <div class="atlas-search-wrap">
+                <i class="bi bi-search"></i>
+                <input class="atlas-search" data-global-search placeholder="Pesquisar nesta tela" />
+            </div>
+            <a class="atlas-icon-btn" href="{{ url_for('scan_tempo_real') }}" title="Abrir Scan"><i class="bi bi-camera"></i></a>
+            <a class="atlas-icon-btn" href="{{ url_for('central_testes') }}" title="Central de testes"><i class="bi bi-sliders"></i></a>
+            <div class="atlas-profile">
+                <div class="atlas-avatar">{{ (g.professor.nome or 'A')[:1]|upper }}</div>
+                <span class="profile-name">{{ g.professor.nome }}</span>
+                <i class="bi bi-chevron-down text-muted"></i>
+            </div>
+        </div>
+
+        <div class="atlas-content">
+            <div class="flash-container">
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ category }} alert-dismissible fade show no-print" role="alert">
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                    {% endfor %}
+                {% endwith %}
+            </div>
+            {% block content %}{% endblock %}
+        </div>
     </main>
+</div>
+{% else %}
+<main class="container py-4 py-lg-5">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+            <div class="alert alert-{{ category }} alert-dismissible fade show no-print" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        {% endfor %}
+    {% endwith %}
+    {% block public_content %}{% block content_public %}{% endblock %}{% endblock %}
+</main>
+{% endif %}
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-    {% block scripts %}{% endblock %}
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="{{ url_for('static', filename='js/atlas-ui.js') }}"></script>
+{% block scripts %}{% endblock %}
 </body>
 </html>

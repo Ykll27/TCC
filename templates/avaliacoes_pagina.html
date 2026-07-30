@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Atlas - Provas{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
+  <div><h1 class="atlas-page-title">Provas</h1><p class="atlas-page-subtitle mb-0">Gerencie avaliações, gabaritos, folhas, segunda chamada e relatórios.</p></div>
+  <a class="btn btn-atlas" href="{{ url_for('home') }}#nova-prova"><i class="bi bi-plus-lg me-1"></i> Nova prova</a>
+</div>
+<div class="atlas-panel">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
+    <h2 class="atlas-section-title">Avaliações cadastradas</h2>
+    <input class="form-control" style="max-width:380px" data-table-filter="#tabelaAvaliacoes" placeholder="Buscar avaliação">
+  </div>
+  <div class="table-responsive">
+    <table class="table table-hover align-middle" id="tabelaAvaliacoes">
+      <thead><tr><th>Título</th><th>Matéria</th><th>Questões</th><th>Status</th><th>Uso</th><th class="text-end">Ações</th></tr></thead>
+      <tbody>
+        {% for a in avaliacoes %}
+        <tr data-search-item>
+          <td><strong>{{ a.titulo }}</strong><div class="small-muted">#{{ a.id }} · {{ a.criado_em }}</div></td>
+          <td>{{ a.materias }}</td><td>{{ a.total_questoes }}</td>
+          <td><span class="badge badge-soft">{{ a.status_revisao or 'rascunho' }}</span></td>
+          <td><span class="small-muted">{{ a.total_folhas or 0 }} folhas · {{ a.total_resultados or 0 }} notas</span></td>
+          <td class="text-end no-print">
+            <div class="btn-group btn-group-sm">
+              <a class="btn btn-soft" href="{{ url_for('ver_avaliacao', avaliacao_id=a.id) }}">Abrir</a>
+              <a class="btn btn-outline-primary" href="{{ url_for('selecionar_alunos_avaliacao', avaliacao_id=a.id) }}">Folhas</a>
+              <a class="btn btn-outline-secondary" href="{{ url_for('relatorio_avaliacao', avaliacao_id=a.id) }}">Relatório</a>
+            </div>
+          </td>
+        </tr>
+        {% else %}<tr><td colspan="6" class="text-muted">Nenhuma avaliação cadastrada.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

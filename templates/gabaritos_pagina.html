@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Atlas - Gabaritos{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
+  <div><h1 class="atlas-page-title">Gabaritos</h1><p class="atlas-page-subtitle mb-0">Confira respostas oficiais antes de aplicar a prova.</p></div>
+  <a class="btn btn-atlas" href="{{ url_for('home') }}#nova-prova"><i class="bi bi-plus-lg me-1"></i> Nova prova</a>
+</div>
+<div class="atlas-panel">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle">
+      <thead><tr><th>Avaliação</th><th>Questões</th><th>Gabarito</th><th class="text-end">Ações</th></tr></thead>
+      <tbody>{% for a in avaliacoes %}<tr data-search-item><td><strong>{{ a.titulo }}</strong><div class="small-muted">{{ a.materias }}</div></td><td>{{ a.total_questoes }}</td><td><span class="small-muted">{{ a.gabarito_formatado }}</span></td><td class="text-end"><a class="btn btn-sm btn-soft" href="{{ url_for('ver_gabarito_avaliacao', avaliacao_id=a.id) }}">Abrir</a></td></tr>{% else %}<tr><td colspan="4" class="text-muted">Nenhum gabarito disponível.</td></tr>{% endfor %}</tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

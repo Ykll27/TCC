@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Atlas - Alunos{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
+  <div><h1 class="atlas-page-title">Alunos</h1><p class="atlas-page-subtitle mb-0">Cadastro limpo, busca rápida e importação por CSV.</p></div>
+  <a class="btn btn-soft" href="{{ url_for('estrutura') }}"><i class="bi bi-diagram-3 me-1"></i> Estrutura</a>
+</div>
+<div class="row g-4">
+  <div class="col-xl-4">
+    <div class="atlas-panel mb-4" data-search-item>
+      <h2 class="atlas-section-title mb-3">Adicionar aluno</h2>
+      <form method="POST" action="{{ url_for('criar_aluno_rota') }}" class="d-grid gap-3">
+        <input class="form-control" name="nome" placeholder="Nome completo" required>
+        <input class="form-control" name="matricula" placeholder="Matrícula/RA" required>
+        <input class="form-control" name="turma" placeholder="Turma. Ex.: 3DS" required>
+        <button class="btn btn-atlas" type="submit"><i class="bi bi-plus-lg me-1"></i> Salvar aluno</button>
+      </form>
+    </div>
+    <div class="atlas-panel" data-search-item>
+      <h2 class="atlas-section-title mb-3">Importar CSV</h2>
+      <form method="POST" enctype="multipart/form-data" action="{{ url_for('importar_alunos_csv') }}" class="d-grid gap-3">
+        <input class="form-control" type="file" name="arquivo_csv" accept=".csv,text/csv" required>
+        <div class="small-muted">Cabeçalho aceito: nome,turma,matricula</div>
+        <button class="btn btn-soft" type="submit"><i class="bi bi-upload me-1"></i> Importar lista</button>
+      </form>
+    </div>
+  </div>
+  <div class="col-xl-8">
+    <div class="atlas-panel">
+      <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
+        <h2 class="atlas-section-title">Lista de alunos</h2>
+        <input class="form-control" style="max-width:360px" data-table-filter="#tabelaAlunos" placeholder="Buscar aluno, turma ou matrícula">
+      </div>
+      <div class="table-responsive">
+        <table class="table table-hover align-middle" id="tabelaAlunos">
+          <thead><tr><th>Aluno</th><th>Matrícula</th><th>Turma</th><th>Cadastro</th></tr></thead>
+          <tbody>{% for aluno in alunos %}<tr data-search-item><td><strong>{{ aluno.nome }}</strong></td><td>{{ aluno.matricula }}</td><td><span class="badge badge-soft">{{ aluno.turma }}</span></td><td>{{ aluno.criado_em or '-' }}</td></tr>{% else %}<tr><td colspan="4" class="text-muted">Nenhum aluno cadastrado.</td></tr>{% endfor %}</tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Atlas - Estrutura{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
+  <div><h1 class="atlas-page-title">Estrutura</h1><p class="atlas-page-subtitle mb-0">Organize o Atlas por áreas, disciplinas e turmas, igual a uma plataforma profissional.</p></div>
+  <a class="btn btn-atlas" href="{{ url_for('alunos_pagina') }}"><i class="bi bi-plus-lg me-1"></i> Adicionar aluno</a>
+</div>
+
+<div class="atlas-tabs-card mb-4">
+  <div class="atlas-tab-card active" data-search-item><span class="atlas-tab-icon"><i class="bi bi-boxes"></i></span><span><strong>Módulos</strong><br><small class="text-muted">Áreas principais</small></span><span class="atlas-tab-count">{{ modulos|length }}</span></div>
+  <div class="atlas-tab-card" data-search-item><span class="atlas-tab-icon"><i class="bi bi-journal-bookmark"></i></span><span><strong>Disciplinas</strong><br><small class="text-muted">Matérias usadas</small></span><span class="atlas-tab-count">{{ disciplinas|length }}</span></div>
+  <div class="atlas-tab-card" data-search-item><span class="atlas-tab-icon"><i class="bi bi-diagram-3"></i></span><span><strong>Turmas</strong><br><small class="text-muted">Grupos de alunos</small></span><span class="atlas-tab-count">{{ turmas|length }}</span></div>
+</div>
+
+<div class="row g-4">
+  <div class="col-xl-4">
+    <div class="atlas-panel h-100"><h2 class="atlas-section-title mb-3">Módulos</h2>
+      {% for m in modulos %}<div class="list-row" data-search-item><div class="row-icon"><i class="bi bi-boxes"></i></div><div><strong>{{ m.nome }}</strong><div class="small-muted">{{ m.total }} avaliação(ões)</div></div></div>{% else %}<div class="empty-state">Crie uma avaliação para gerar módulos automaticamente.</div>{% endfor %}
+    </div>
+  </div>
+  <div class="col-xl-4">
+    <div class="atlas-panel h-100"><h2 class="atlas-section-title mb-3">Disciplinas</h2>
+      {% for d in disciplinas %}<div class="list-row" data-search-item><div class="row-icon"><i class="bi bi-journal-bookmark"></i></div><div><strong>{{ d.nome }}</strong><div class="small-muted">{{ d.total }} prova(s)</div></div></div>{% else %}<div class="empty-state">Nenhuma disciplina cadastrada ainda.</div>{% endfor %}
+    </div>
+  </div>
+  <div class="col-xl-4">
+    <div class="atlas-panel h-100"><h2 class="atlas-section-title mb-3">Turmas</h2>
+      {% for t in turmas %}<div class="list-row" data-search-item><div class="row-icon"><i class="bi bi-people"></i></div><div><strong>{{ t.turma }}</strong><div class="small-muted">{{ t.total }} aluno(s)</div></div></div>{% else %}<div class="empty-state">Cadastre alunos para aparecerem aqui.</div>{% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}

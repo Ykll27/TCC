@@ -2334,23 +2334,28 @@ def api_corrigir_questao_resultado(resultado_id):
 
 @app.route("/corrigir", methods=["POST"])
 def corrigir():
-    """
-    Corrige uma ou várias folhas.
+    """Corrige folhas por upload com segurança reforçada.
 
-    Importante: a prova correta vem do QR Code da própria folha.
-    O campo "Prova base" fica apenas como plano B, caso o QR não seja lido.
-    Isso evita corrigir a folha da Ana com o gabarito do Carlos, por exemplo.
+    Regra profissional do Atlas:
+    - QR válido: corrige e salva no aluno/prova do QR.
+    - QR ausente/inválido: NÃO usa a prova base para adivinhar aluno.
+      A folha vira pendência de identificação assistida.
     """
-    prova_base_id = int(request.form["prova_id"])
+    try:
+        prova_base_id = int(request.form.get("prova_id") or 0)
+    except Exception:
+        prova_base_id = 0
     arquivos = request.files.getlist("folhas")
 
     if not arquivos:
         flash("Envie pelo menos uma folha.", "danger")
         return redirect(url_for("home"))
 
+    pid = int(professor_atual_id())
     conn = conectar()
     prova_base = conn.execute(
-        "SELECT * FROM provas WHERE id = ? AND professor_id = ?", (prova_base_id, int(professor_atual_id()))
+        "SELECT * FROM provas WHERE id = ? AND professor_id = ?",
+        (prova_base_id, pid),
     ).fetchone()
 
     if not prova_base:
@@ -2359,7 +2364,43 @@ def corrigir():
         return redirect(url_for("home"))
 
     total_corrigidas = 0
+    total_pendentes = 0
     avisos = []
+
+    def criar_pendencia(caminho, mensagem, dados_qr=None):
+        nonlocal total_pendentes
+        try:
+            texto, msg_ocr = _ocr_nome_cabecalho(caminho)
+        except Exception:
+            texto, msg_ocr = "", "OCR não disponível ou não conseguiu ler o cabeçalho."
+        try:
+            sugestoes = _sugerir_alunos_por_texto(conn, pid, texto)
+        except Exception:
+            sugestoes = []
+        payload = {
+            "motivo": mensagem,
+            "qr_lido": dados_qr or {},
+            "ocr": msg_ocr,
+        }
+        conn.execute(
+            """
+            INSERT INTO identificacoes_pendentes
+            (professor_id, avaliacao_id, prova_base_id, imagem_arquivo, texto_detectado, sugestoes_json, status, criado_em, atualizado_em)
+            VALUES (?, ?, ?, ?, ?, ?, 'pendente', ?, ?)
+            """,
+            (
+                pid,
+                prova_base["avaliacao_id"] if "avaliacao_id" in prova_base.keys() else None,
+                prova_base_id,
+                str(caminho),
+                texto or json.dumps(payload, ensure_ascii=False),
+                json.dumps(sugestoes, ensure_ascii=False),
+                agora_str(),
+                agora_str(),
+            ),
+        )
+        total_pendentes += 1
+        avisos.append(f"{Path(str(caminho)).name}: {mensagem} Enviada para identificação assistida.")
 
     for arquivo in arquivos:
         if arquivo.filename == "":
@@ -2373,23 +2414,17 @@ def corrigir():
 
         for caminho in imagens_para_corrigir:
             dados_qr = ler_qrcode(str(caminho))
-            prova_corrigir = prova_base
+            prova_corrigir = None
+            validacao = None
 
-            if dados_qr and dados_qr.get("prova_id"):
-                prova_qr = conn.execute(
-                    "SELECT * FROM provas WHERE id = ? AND professor_id = ?", (int(dados_qr["prova_id"]), int(professor_atual_id()))
-                ).fetchone()
+            if not dados_qr:
+                criar_pendencia(caminho, "QR Code não identificado.")
+                continue
 
-                if prova_qr:
-                    prova_corrigir = prova_qr
-                else:
-                    avisos.append(
-                        f"QR de {arquivo.filename} apontou para uma prova que não existe mais. Usei a prova base."
-                    )
-            else:
-                avisos.append(
-                    f"Não consegui ler o QR de {arquivo.filename}. Usei a prova base selecionada."
-                )
+            prova_corrigir, validacao = resolver_prova_por_qr_scan(conn, dados_qr, {}, prova_base)
+            if not validacao.get("ok"):
+                criar_pendencia(caminho, validacao.get("mensagem", "QR inválido."), dados_qr=dados_qr)
+                continue
 
             gabarito_oficial = json.loads(prova_corrigir["gabarito_json"])
 
@@ -2400,35 +2435,32 @@ def corrigir():
                     gabarito_oficial=gabarito_oficial,
                     mapa_alternativas=mapa_alternativas,
                     tipo_prova=prova_corrigir["tipo_prova"] if "tipo_prova" in prova_corrigir.keys() and prova_corrigir["tipo_prova"] else "A",
+                    dados_qr_pre_lido=dados_qr,
                 )
             except Exception as erro:
                 avisos.append(f"Erro ao corrigir {arquivo.filename}: {erro}")
                 continue
 
-            # Mantém o QR pré-lido no resultado para facilitar debug, mesmo quando o corretor não reler o QR.
             if dados_qr and not resultado.get("dados_qr"):
                 resultado["dados_qr"] = dados_qr
 
-            aluno_id = (
-                int(dados_qr["aluno_id"])
-                if dados_qr and dados_qr.get("aluno_id")
-                else prova_corrigir["aluno_id"]
-            )
-            nota = resultado["resultado"]["nota_percentual"]
+            aluno_id = int(prova_corrigir["aluno_id"])
+            nota = float(resultado["resultado"]["nota_percentual"])
+            status = "confiavel" if resultado["resultado"].get("anuladas_ou_em_branco", 0) == 0 else "revisao"
 
             conn.execute(
                 """
                 INSERT INTO resultados (professor_id, aluno_id, prova_id, nota_percentual, resultado_json, status_confianca, criado_em)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
+                """,
                 (
-                    int(professor_atual_id()),
+                    pid,
                     aluno_id,
-                    prova_corrigir["id"],
+                    int(prova_corrigir["id"]),
                     nota,
                     json.dumps(resultado, ensure_ascii=False),
-                    "confiavel" if resultado["resultado"].get("anuladas_ou_em_branco", 0) == 0 else "revisao",
-                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    status,
+                    agora_str(),
                 ),
             )
             total_corrigidas += 1
@@ -2438,14 +2470,15 @@ def corrigir():
 
     if total_corrigidas:
         flash(f"Correção finalizada. {total_corrigidas} folha(s) corrigida(s).", "success")
-    else:
+    if total_pendentes:
+        flash(f"{total_pendentes} folha(s) foram enviadas para Identificação Assistida porque o QR não estava confiável.", "warning")
+    if not total_corrigidas and not total_pendentes:
         flash("Nenhuma folha válida foi enviada.", "warning")
 
-    for aviso in avisos[:5]:
+    for aviso in avisos[:6]:
         flash(aviso, "warning")
-
-    if len(avisos) > 5:
-        flash(f"Mais {len(avisos) - 5} aviso(s) ocultado(s).", "warning")
+    if len(avisos) > 6:
+        flash(f"Mais {len(avisos) - 6} aviso(s) ocultado(s).", "warning")
 
     return redirect(url_for("home"))
 
@@ -3436,6 +3469,123 @@ def encerramento_ano_letivo():
     finally:
         conn.close()
     return render_template("encerramento_ano.html", arquivos=arquivos, totais_abertos=totais_abertos, ano_padrao=ano_padrao, carregar_json_seguro=carregar_json_seguro)
+
+
+# ---------------------------------------------------------------------------
+# Navegação profissional: telas separadas para as funções mais usadas
+# ---------------------------------------------------------------------------
+def _avaliacoes_com_contadores(conn, pid):
+    linhas = conn.execute(
+        """
+        SELECT avaliacoes.*,
+               (SELECT COUNT(*) FROM provas WHERE provas.avaliacao_id = avaliacoes.id AND provas.professor_id = avaliacoes.professor_id AND COALESCE(provas.arquivado,0)=0) AS total_folhas,
+               (SELECT COUNT(*) FROM resultados JOIN provas p2 ON p2.id = resultados.prova_id WHERE p2.avaliacao_id = avaliacoes.id AND resultados.professor_id = avaliacoes.professor_id AND COALESCE(resultados.arquivado,0)=0) AS total_resultados,
+               (SELECT MAX(resultados.criado_em) FROM resultados JOIN provas p3 ON p3.id = resultados.prova_id WHERE p3.avaliacao_id = avaliacoes.id AND resultados.professor_id = avaliacoes.professor_id AND COALESCE(resultados.arquivado,0)=0) AS ultima_correcao
+        FROM avaliacoes
+        WHERE professor_id = ? AND COALESCE(arquivado,0)=0
+        ORDER BY id DESC
+        """,
+        (pid,),
+    ).fetchall()
+    saida = []
+    for linha in linhas:
+        item = dict(linha)
+        item["gabarito_formatado"] = formatar_gabarito(carregar_json_seguro(item.get("gabarito_json"), {}))
+        saida.append(item)
+    return saida
+
+
+@app.route("/estrutura")
+def estrutura():
+    pid = int(professor_atual_id())
+    conn = conectar()
+    try:
+        alunos_turmas = conn.execute(
+            "SELECT turma, COUNT(*) AS total FROM alunos WHERE professor_id = ? GROUP BY turma ORDER BY turma",
+            (pid,),
+        ).fetchall()
+        avaliacoes = conn.execute(
+            "SELECT materias FROM avaliacoes WHERE professor_id = ? AND COALESCE(arquivado,0)=0",
+            (pid,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    contagem = {}
+    for av in avaliacoes:
+        for parte in str(av["materias"] or "Geral").replace(";", ",").split(","):
+            nome = parte.strip() or "Geral"
+            contagem[nome] = contagem.get(nome, 0) + 1
+    disciplinas = [{"nome": k, "total": v} for k, v in sorted(contagem.items())]
+    modulos = disciplinas[:6] if disciplinas else []
+    return render_template("estrutura.html", turmas=alunos_turmas, disciplinas=disciplinas, modulos=modulos)
+
+
+@app.route("/alunos")
+def alunos_pagina():
+    pid = int(professor_atual_id())
+    conn = conectar()
+    try:
+        alunos = conn.execute(
+            "SELECT * FROM alunos WHERE professor_id = ? AND COALESCE(arquivado,0)=0 ORDER BY turma, nome",
+            (pid,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return render_template("alunos_pagina.html", alunos=alunos)
+
+
+@app.route("/avaliacoes")
+def avaliacoes_pagina():
+    pid = int(professor_atual_id())
+    conn = conectar()
+    try:
+        avaliacoes = _avaliacoes_com_contadores(conn, pid)
+    finally:
+        conn.close()
+    return render_template("avaliacoes_pagina.html", avaliacoes=avaliacoes)
+
+
+@app.route("/gabaritos")
+def gabaritos_pagina():
+    pid = int(professor_atual_id())
+    conn = conectar()
+    try:
+        avaliacoes = _avaliacoes_com_contadores(conn, pid)
+    finally:
+        conn.close()
+    return render_template("gabaritos_pagina.html", avaliacoes=avaliacoes)
+
+
+@app.route("/folhas")
+def folhas_pagina():
+    pid = int(professor_atual_id())
+    conn = conectar()
+    try:
+        provas = conn.execute(
+            """
+            SELECT provas.*, alunos.nome AS aluno_nome, alunos.matricula, alunos.turma
+            FROM provas
+            JOIN alunos ON alunos.id = provas.aluno_id
+            WHERE provas.professor_id = ? AND COALESCE(provas.arquivado,0)=0
+            ORDER BY provas.id DESC
+            """,
+            (pid,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return render_template("folhas_pagina.html", provas=provas)
+
+
+@app.route("/relatorios")
+def relatorios_pagina():
+    pid = int(professor_atual_id())
+    conn = conectar()
+    try:
+        avaliacoes = _avaliacoes_com_contadores(conn, pid)
+    finally:
+        conn.close()
+    return render_template("relatorios_pagina.html", avaliacoes=avaliacoes)
 
 
 if __name__ == "__main__":
