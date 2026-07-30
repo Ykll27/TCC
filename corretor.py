@@ -892,10 +892,13 @@ def corrigir_imagem_web(
     usar_ia="auto",
     mapa_alternativas: Optional[Dict[str, Any]] = None,
     tipo_prova: str = "A",
+    dados_qr_pre_lido: Optional[Dict[str, Any]] = None,
 ):
     gabarito_oficial = normalizar_gabarito_oficial(gabarito_oficial)
     total = len(gabarito_oficial)
-    dados_qr = ler_qrcode(caminho_gabarito_aluno)
+    # No Scan o backend já validou o QR antes de entrar na correção.
+    # Reusar esse dado evita uma segunda tentativa de leitura e reduz latência.
+    dados_qr = dados_qr_pre_lido if dados_qr_pre_lido is not None else ler_qrcode(caminho_gabarito_aluno)
 
     omr = detectar_respostas_omr(caminho_gabarito_aluno, total)
 

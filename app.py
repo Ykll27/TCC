@@ -84,13 +84,23 @@ def garantir_banco_atualizado():
     return None
 
 
-def gerar_qr(aluno, prova_id, titulo, disciplina, tipo_prova="A"):
+def gerar_qr(aluno, prova_id, titulo, disciplina, tipo_prova="A", avaliacao_id=None):
+    """Gera QR Code forte para identificar a folha sem depender de fallback.
+
+    O QR agora carrega prova_id, aluno_id, professor_id e avaliacao_id.
+    No Scan, o Atlas só salva a correção quando esses dados batem com o banco.
+    Isso evita o bug de atribuir a folha ao aluno escolhido no seletor quando o QR falha.
+    """
     dados = {
-        "aluno_id": aluno["id"],
+        "qr_version": 2,
+        "sistema": "Atlas",
+        "aluno_id": int(aluno["id"]),
         "nome": aluno["nome"],
         "matricula": aluno["matricula"],
         "turma": aluno["turma"],
-        "prova_id": prova_id,
+        "professor_id": int(professor_atual_id() or 0),
+        "avaliacao_id": int(avaliacao_id or 0) if avaliacao_id else None,
+        "prova_id": int(prova_id),
         "titulo": titulo,
         "disciplina": disciplina,
         "tipo_prova": str(tipo_prova or "A").upper(),
@@ -633,6 +643,43 @@ def preparar_provas_para_tela(provas):
     return provas_prontas
 
 
+def preparar_opcoes_scan(provas):
+    """Agrupa folhas por avaliação para a tela de Scan.
+
+    Antes o seletor mostrava uma prova/folha de cada aluno. Isso confundia o
+    professor e, quando o QR falhava, o sistema podia usar o aluno selecionado
+    como fallback. Agora o seletor representa a avaliação inteira; a identidade
+    do aluno vem obrigatoriamente do QR Code validado.
+    """
+    grupos = {}
+    for prova in provas:
+        item = dict(prova)
+        chave = str(item.get("avaliacao_id") or item.get("id"))
+        if chave not in grupos:
+            grupos[chave] = {
+                "id": item.get("id"),
+                "avaliacao_id": item.get("avaliacao_id"),
+                "titulo": item.get("titulo"),
+                "disciplina": item.get("disciplina"),
+                "tipo_prova": "A/B",
+                "total_folhas": 0,
+                "turmas_set": set(),
+                "gabarito_json": item.get("gabarito_json"),
+                "aluno_nome": "Avaliação inteira",
+            }
+        grupos[chave]["total_folhas"] += 1
+        turma = str(item.get("turma") or "").strip()
+        if turma:
+            grupos[chave]["turmas_set"].add(turma)
+
+    saida = []
+    for item in grupos.values():
+        turmas = sorted(item.pop("turmas_set", set()))
+        item["turmas_texto"] = ", ".join(turmas) if turmas else "Sem turma"
+        saida.append(item)
+    return sorted(saida, key=lambda x: str(x.get("titulo") or "").lower())
+
+
 def preparar_resultados_para_tela(resultados):
     """Adiciona professor x aluno para tirar a prova real pela interface."""
     resultados_prontos = []
@@ -779,6 +826,76 @@ def buscar_prova_com_aluno(conn, prova_id: int):
         """,
         (int(prova_id),),
     ).fetchone()
+
+
+def resolver_prova_por_qr_scan(conn, dados_qr, sessao, prova_base):
+    """Resolve a folha usando somente QR Code confiável.
+
+    Regra de segurança: no Scan, a prova base serve apenas para dizer qual
+    avaliação está sendo aplicada. Ela NÃO pode identificar aluno. Se o QR falha,
+    o Atlas não corrige e não salva resultado, evitando aluno errado.
+    """
+    if not dados_qr or not isinstance(dados_qr, dict):
+        return None, {
+            "ok": False,
+            "status": "sem_qr",
+            "mensagem": "QR Code não identificado. Aproxime a folha, melhore a luz ou use Identificação assistida.",
+        }
+
+    try:
+        prova_id_qr = int(dados_qr.get("prova_id") or 0)
+    except Exception:
+        prova_id_qr = 0
+    if prova_id_qr <= 0:
+        return None, {
+            "ok": False,
+            "status": "qr_invalido",
+            "mensagem": "QR Code lido, mas não contém prova_id válido. Gere folhas novas pelo Atlas.",
+        }
+
+    prova_qr = buscar_prova_com_aluno(conn, prova_id_qr)
+    if not prova_qr:
+        return None, {
+            "ok": False,
+            "status": "qr_nao_encontrado",
+            "mensagem": "QR Code aponta para uma prova que não existe nesta conta do professor.",
+        }
+
+    # Confere se o aluno gravado no QR bate com o aluno ligado à prova.
+    try:
+        aluno_id_qr = int(dados_qr.get("aluno_id") or 0)
+    except Exception:
+        aluno_id_qr = 0
+    if aluno_id_qr and aluno_id_qr != int(prova_qr["aluno_id"]):
+        return None, {
+            "ok": False,
+            "status": "qr_inconsistente",
+            "mensagem": "QR Code inconsistente: aluno do QR não bate com a folha salva. Reimprima a folha.",
+        }
+
+    # Confere se a sessão foi aberta para a mesma avaliação.
+    base_avaliacao = int(prova_base["avaliacao_id"] or 0) if "avaliacao_id" in prova_base.keys() and prova_base["avaliacao_id"] else 0
+    qr_avaliacao = int(prova_qr["avaliacao_id"] or 0) if "avaliacao_id" in prova_qr.keys() and prova_qr["avaliacao_id"] else 0
+    if base_avaliacao and qr_avaliacao and base_avaliacao != qr_avaliacao:
+        return None, {
+            "ok": False,
+            "status": "prova_diferente",
+            "mensagem": "Esta folha pertence a outra avaliação. Finalize a sessão atual ou selecione a avaliação correta.",
+        }
+
+    # Confere professor quando o QR novo possui professor_id.
+    try:
+        professor_qr = int(dados_qr.get("professor_id") or 0)
+    except Exception:
+        professor_qr = 0
+    if professor_qr and professor_qr != int(professor_atual_id()):
+        return None, {
+            "ok": False,
+            "status": "professor_diferente",
+            "mensagem": "Esta folha pertence a outra conta de professor.",
+        }
+
+    return prova_qr, {"ok": True, "status": "qr_ok", "mensagem": "QR validado com sucesso."}
 
 
 def recalcular_sessao_scan(conn, sessao_id: int):
@@ -1468,7 +1585,7 @@ def selecionar_alunos_avaliacao(avaliacao_id):
             prova_id = cursor.lastrowid
             tipo_prova = "A" if (len(folhas_geradas) % 2 == 0) else "B"
             mapa_alternativas = gerar_mapa_alternativas(dados_avaliacao["total_questoes"], tipo_prova, avaliacao_id, aluno_id)
-            qr_arquivo = gerar_qr(aluno, prova_id, dados_avaliacao["titulo"], dados_avaliacao["materias"], tipo_prova)
+            qr_arquivo = gerar_qr(aluno, prova_id, dados_avaliacao["titulo"], dados_avaliacao["materias"], tipo_prova, avaliacao_id=avaliacao_id)
             conn.execute(
                 "UPDATE provas SET qr_arquivo = ?, tipo_prova = ?, mapa_alternativas_json = ? WHERE id = ?",
                 (qr_arquivo, tipo_prova, json.dumps(mapa_alternativas, ensure_ascii=False), prova_id),
@@ -1536,12 +1653,12 @@ def selecionar_alunos_avaliacao(avaliacao_id):
 def scan_tempo_real():
     conn = conectar()
     try:
-        provas = conn.execute(
+        provas_raw = conn.execute(
             """
             SELECT provas.*, alunos.nome AS aluno_nome, alunos.matricula, alunos.turma
             FROM provas
             JOIN alunos ON alunos.id = provas.aluno_id
-            WHERE provas.professor_id = ?
+            WHERE provas.professor_id = ? AND COALESCE(provas.arquivado,0)=0
             ORDER BY provas.id DESC
             """,
             (int(professor_atual_id()),),
@@ -1561,7 +1678,7 @@ def scan_tempo_real():
 
     return render_template(
         "scan.html",
-        provas=preparar_provas_para_tela(provas),
+        provas=preparar_opcoes_scan(provas_raw),
         sessoes=sessoes,
     )
 
@@ -1629,7 +1746,11 @@ def finalizar_sessao_scan_rota():
 
 @app.route("/scan/processar-frame", methods=["POST"])
 def processar_frame_scan_rota():
-    """Recebe um frame da câmera, corrige por OpenCV e devolve o resultado em JSON."""
+    """Recebe um frame da câmera, valida o QR e corrige por OpenCV.
+
+    Correção importante: a identidade do aluno agora vem somente do QR Code
+    validado no banco. A prova base não é mais usada como fallback de aluno.
+    """
     dados = request.get_json(silent=True) or {}
 
     try:
@@ -1654,31 +1775,29 @@ def processar_frame_scan_rota():
 
         prova_base = buscar_prova_com_aluno(conn, prova_base_id)
         if not prova_base:
-            return jsonify({"ok": False, "status": "erro", "mensagem": "Prova base não encontrada."}), 404
+            return jsonify({"ok": False, "status": "erro", "mensagem": "Avaliação base não encontrada."}), 404
 
         dados_qr = ler_qrcode(str(caminho))
-        prova_corrigir = prova_base
-        mensagem_qr = "QR não lido; usei a prova base como fallback."
+        prova_corrigir, validacao_qr = resolver_prova_por_qr_scan(conn, dados_qr, sessao, prova_base)
+        latencia_pre = round((time.perf_counter() - inicio) * 1000, 2)
 
-        if dados_qr and dados_qr.get("prova_id"):
-            prova_qr = buscar_prova_com_aluno(conn, int(dados_qr["prova_id"]))
-            if prova_qr:
-                prova_corrigir = prova_qr
-                mensagem_qr = "QR lido com sucesso."
-            else:
-                mensagem_qr = "QR lido, mas a prova apontada não existe; usei a prova base."
+        if not validacao_qr.get("ok"):
+            # Não salva resultado sem QR confiável. Isso evita lançar nota no aluno errado.
+            resumo = recalcular_sessao_scan(conn, sessao_id)
+            conn.commit()
+            return jsonify({
+                "ok": True,
+                "status": validacao_qr.get("status", "sem_qr"),
+                "registrar_ui": False,
+                "precisa_identificacao": True,
+                "mensagem": validacao_qr.get("mensagem", "QR Code não identificado."),
+                "latencia_ms": latencia_pre,
+                "resumo": resumo,
+            })
 
-        aluno_id = (
-            int(dados_qr["aluno_id"])
-            if dados_qr and dados_qr.get("aluno_id")
-            else int(prova_corrigir["aluno_id"])
-        )
+        aluno_id = int(prova_corrigir["aluno_id"])
         prova_id = int(prova_corrigir["id"])
 
-        # Evita salvar/mostrar a mesma folha repetidamente durante uma sessão em lote.
-        # Antes o backend retornava status "duplicado" a cada frame e o frontend
-        # adicionava vários cards iguais na lista. Agora duplicata confirmada é
-        # apenas ignorada, sem entrar no painel de "Últimas leituras".
         leitura_confirmada = conn.execute(
             """
             SELECT leituras_scan.*, resultados.nota_percentual
@@ -1718,6 +1837,7 @@ def processar_frame_scan_rota():
             usar_ia=False,
             mapa_alternativas=mapa_alternativas,
             tipo_prova=prova_corrigir["tipo_prova"] if "tipo_prova" in prova_corrigir.keys() and prova_corrigir["tipo_prova"] else "A",
+            dados_qr_pre_lido=dados_qr,
         )
         if dados_qr and not resultado.get("dados_qr"):
             resultado["dados_qr"] = dados_qr
@@ -1725,12 +1845,16 @@ def processar_frame_scan_rota():
         nota = float(resultado["resultado"]["nota_percentual"])
         processamento = resultado.get("processamento", {})
         omr = processamento.get("omr", {}) if isinstance(processamento, dict) else {}
-        status_omr = omr.get("status_omr", "")
-        confianca_baixa = status_omr in ["falha_calibracao", "sem_marcacoes_detectadas", "erro"]
-        sem_qr = not bool(dados_qr and dados_qr.get("prova_id"))
+        status_omr = str(omr.get("status_omr", "")).lower()
+        questoes_mapeadas = int(omr.get("questoes_mapeadas") or 0)
+        total_oficial = max(1, len(gabarito_oficial))
+        confianca_baixa = (
+            status_omr in ["falha_calibracao", "sem_marcacoes_detectadas", "erro"]
+            or questoes_mapeadas < max(1, int(total_oficial * 0.80))
+        )
 
-        status_leitura = "revisao" if confianca_baixa or sem_qr else "ok"
-        mensagem = mensagem_qr
+        status_leitura = "revisao" if confianca_baixa else "ok"
+        mensagem = validacao_qr.get("mensagem", "QR validado com sucesso.")
         if confianca_baixa:
             mensagem = f"{mensagem} Leitura OMR precisa de revisão: {omr.get('mensagem', status_omr)}"
 
@@ -1740,11 +1864,9 @@ def processar_frame_scan_rota():
             "latencia_ms": latencia_ms,
             "status_scan": status_leitura,
             "mensagem_scan": mensagem,
+            "qr_validado": True,
         }
 
-        # Se a leitura ficou duvidosa, não deixe o mesmo frame gerar vários
-        # registros de revisão em sequência. Isso também permite tentar de novo:
-        # uma leitura em revisão não bloqueia uma futura leitura OK da mesma folha.
         if status_leitura == "revisao":
             ultima_revisao = conn.execute(
                 """
