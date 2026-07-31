@@ -27,9 +27,11 @@ from gerador_provas import gerar_prova_enem, _criar_questao_fallback
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 QR_DIR = BASE_DIR / "static" / "qrcodes"
+QUESTAO_IMG_DIR = BASE_DIR / "static" / "questoes"
 
 UPLOAD_DIR.mkdir(exist_ok=True)
 QR_DIR.mkdir(parents=True, exist_ok=True)
+QUESTAO_IMG_DIR.mkdir(parents=True, exist_ok=True)
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret-key-troque-em-producao")
@@ -151,6 +153,59 @@ def caminho_relativo_upload(caminho: Path) -> str:
         return str(Path(caminho).resolve().relative_to(UPLOAD_DIR.resolve()))
     except Exception:
         return Path(caminho).name
+
+
+
+EXTENSOES_IMAGEM_QUESTAO = {".png", ".jpg", ".jpeg", ".webp"}
+
+
+def salvar_imagem_questao(arquivo, avaliacao_id: int, numero_questao: int):
+    """Salva imagem enviada pelo professor para ser usada no enunciado.
+
+    A imagem fica em static/questoes/ e o caminho relativo é salvo dentro do
+    JSON da questão. O Atlas valida extensão e tenta abrir com Pillow para
+    evitar arquivo corrompido ou não-imagem.
+    """
+    if not arquivo or not getattr(arquivo, "filename", ""):
+        return None
+
+    nome_seguro = secure_filename(arquivo.filename)
+    sufixo = Path(nome_seguro).suffix.lower()
+    if sufixo not in EXTENSOES_IMAGEM_QUESTAO:
+        raise ValueError("Formato de imagem inválido. Use PNG, JPG, JPEG ou WEBP.")
+
+    nome_final = f"avaliacao_{int(avaliacao_id)}_q{int(numero_questao)}_{uuid.uuid4().hex[:10]}{sufixo}"
+    destino = QUESTAO_IMG_DIR / nome_final
+    arquivo.save(destino)
+
+    try:
+        from PIL import Image, UnidentifiedImageError
+        try:
+            with Image.open(destino) as img:
+                img.verify()
+        except UnidentifiedImageError:
+            destino.unlink(missing_ok=True)
+            raise ValueError("O arquivo enviado não parece ser uma imagem válida.")
+    except ImportError:
+        # Pillow já está no requirements, mas esse fallback evita quebrar localmente.
+        pass
+
+    return f"questoes/{nome_final}"
+
+
+def limpar_visual_imagem_antiga(visual):
+    """Remove arquivo antigo de imagem se ele pertencer à pasta static/questoes."""
+    if not isinstance(visual, dict):
+        return
+    arquivo = str(visual.get("arquivo") or "")
+    if not arquivo.startswith("questoes/"):
+        return
+    caminho = (BASE_DIR / "static" / arquivo).resolve()
+    try:
+        if str(caminho).startswith(str(QUESTAO_IMG_DIR.resolve())) and caminho.exists():
+            caminho.unlink()
+    except Exception:
+        pass
 
 
 def normalizar_texto_busca(texto: str) -> str:
@@ -1140,7 +1195,31 @@ def _desenhar_visual_pdf(c, visual, x, y, largura):
     c.drawString(x, y, titulo)
     y -= 12
 
-    if tipo == "tabela":
+    if tipo in ["imagem_upload", "imagem"] and visual.get("arquivo"):
+        try:
+            from PIL import Image
+            from reportlab.lib.utils import ImageReader
+            arquivo_rel = str(visual.get("arquivo") or "").lstrip("/")
+            caminho_img = (BASE_DIR / "static" / arquivo_rel).resolve()
+            static_base = (BASE_DIR / "static").resolve()
+            if not str(caminho_img).startswith(str(static_base)) or not caminho_img.exists():
+                raise FileNotFoundError("Imagem da questão não encontrada.")
+
+            with Image.open(caminho_img) as img:
+                iw, ih = img.size
+            max_w = largura
+            max_h = 230
+            escala = min(max_w / max(iw, 1), max_h / max(ih, 1), 1.0)
+            draw_w = iw * escala
+            draw_h = ih * escala
+            y = _garantir_espaco_pdf(c, y, int(draw_h) + 65)
+            c.drawImage(ImageReader(str(caminho_img)), x, y - draw_h, width=draw_w, height=draw_h, preserveAspectRatio=True, mask="auto")
+            y -= draw_h + 8
+        except Exception:
+            desc = str(visual.get("descricao") or "Imagem enviada pelo professor não pôde ser carregada no PDF.")
+            y = _texto_pdf(c, "Imagem: " + desc, x, y, largura, tamanho=8, entrelinha=11)
+
+    elif tipo == "tabela":
         colunas = visual.get("colunas") if isinstance(visual.get("colunas"), list) else []
         linhas = visual.get("linhas") if isinstance(visual.get("linhas"), list) else []
         if colunas:
@@ -2222,6 +2301,35 @@ def editar_avaliacao(avaliacao_id):
                 dados_calculo = antigo.get("dados_calculo") or {}
             resolucao_txt = request.form.get(f"q{i}_resolucao", "").strip()
             resolucao = [p.strip() for p in resolucao_txt.split("\n") if p.strip()] if resolucao_txt else (antigo.get("resolucao") or [])
+
+            # Imagem enviada pelo professor para a questão.
+            # Ela substitui o elemento visual JSON apenas naquela questão.
+            if request.form.get(f"q{i}_remover_imagem") == "1":
+                limpar_visual_imagem_antiga(elemento_visual)
+                elemento_visual = {}
+
+            imagem_upload = request.files.get(f"q{i}_imagem_upload")
+            if imagem_upload and imagem_upload.filename:
+                try:
+                    arquivo_estatico = salvar_imagem_questao(imagem_upload, avaliacao_id, i)
+                except ValueError as erro:
+                    flash(str(erro), "danger")
+                    return redirect(url_for("editar_avaliacao", avaliacao_id=avaliacao_id))
+
+                limpar_visual_imagem_antiga(elemento_visual)
+                elemento_visual = {
+                    "tipo": "imagem_upload",
+                    "titulo": request.form.get(f"q{i}_imagem_titulo", "").strip() or f"Imagem da questão {i}",
+                    "descricao": request.form.get(f"q{i}_imagem_descricao", "").strip(),
+                    "fonte": request.form.get(f"q{i}_imagem_fonte", "").strip() or "Imagem enviada pelo professor",
+                    "arquivo": arquivo_estatico,
+                }
+            elif isinstance(elemento_visual, dict) and elemento_visual.get("tipo") == "imagem_upload":
+                # Permite editar título/fonte/descrição da imagem já enviada sem reanexar o arquivo.
+                elemento_visual["titulo"] = request.form.get(f"q{i}_imagem_titulo", "").strip() or elemento_visual.get("titulo") or f"Imagem da questão {i}"
+                elemento_visual["descricao"] = request.form.get(f"q{i}_imagem_descricao", "").strip()
+                elemento_visual["fonte"] = request.form.get(f"q{i}_imagem_fonte", "").strip() or elemento_visual.get("fonte") or "Imagem enviada pelo professor"
+
             questoes.append({
                 "numero": i,
                 "area": request.form.get(f"q{i}_area", "").strip(),

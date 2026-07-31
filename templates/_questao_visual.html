@@ -7,7 +7,12 @@
     </div>
     {% if v.descricao %}<p class="small-muted mb-2">{{ v.descricao }}</p>{% endif %}
 
-    {% if v.tipo == 'tabela' %}
+    {% if v.tipo in ['imagem_upload', 'imagem'] and v.arquivo %}
+        <figure class="mb-2">
+            <img src="{{ url_for('static', filename=v.arquivo) }}" class="img-fluid rounded-3 border bg-white w-100" style="max-height: 420px; object-fit: contain;" alt="{{ v.descricao or v.titulo or 'Imagem da questão' }}">
+            {% if v.descricao %}<figcaption class="small-muted mt-2">{{ v.descricao }}</figcaption>{% endif %}
+        </figure>
+    {% elif v.tipo == 'tabela' %}
         <div class="table-responsive">
             <table class="table table-sm table-bordered bg-white mb-2 align-middle">
                 {% if v.colunas %}
