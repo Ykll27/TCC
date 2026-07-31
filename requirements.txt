@@ -9,4 +9,3 @@ google-genai
 werkzeug
 PyMuPDF
 reportlab
-psycopg2-binary

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Atlas - Melhorar prova{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+    <div><h1 class="atlas-title">Melhoramento de prova</h1><p class="atlas-subtitle mb-0">{{ avaliacao.titulo }} · análise de qualidade antes de aplicar.</p></div>
+    <a class="btn btn-outline-secondary" href="{{ url_for('ver_avaliacao', avaliacao_id=avaliacao.id) }}">Voltar</a>
+</div>
+<div class="card atlas-card mb-4"><div class="card-body p-4">
+    <h2 class="atlas-title h5">Problemas encontrados</h2>
+    <div class="table-responsive"><table class="table align-middle">
+        <thead><tr><th>Questão</th><th>Tipo</th><th>Mensagem</th></tr></thead>
+        <tbody>{% for d in diagnosticos %}<tr><td>Q{{ d.questao }}</td><td><span class="badge text-bg-warning">{{ d.tipo }}</span></td><td>{{ d.mensagem }}</td></tr>{% else %}<tr><td colspan="3" class="text-muted">Nenhum problema básico encontrado.</td></tr>{% endfor %}</tbody>
+    </table></div>
+</div></div>
+<form method="POST" class="card atlas-card"><div class="card-body p-4">
+    <h2 class="atlas-title h5">Aplicar melhorias automáticas seguras</h2>
+    <p class="small-muted">Essa ação normaliza espaços, preenche explicações básicas vazias e corrige gabaritos inválidos para evitar erro no sistema. Não muda o conteúdo principal da prova.</p>
+    <button class="btn btn-warning" type="submit">Aplicar melhorias</button>
+</div></form>
+{% endblock %}

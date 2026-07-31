@@ -3,16 +3,7 @@
 {% block content %}
 <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4 no-print">
     <div><h1 class="atlas-title">{{ avaliacao.titulo }}</h1><p class="atlas-subtitle mb-0">{{ avaliacao.materias }} · {{ avaliacao.total_questoes }} questão(ões)</p></div>
-    <div class="d-flex flex-wrap gap-2">
-        <a class="btn btn-outline-secondary" href="{{ url_for('editar_avaliacao', avaliacao_id=avaliacao.id) }}">Revisar</a>
-        <a class="btn btn-outline-primary" href="{{ url_for('baixar_pdf_avaliacao', avaliacao_id=avaliacao.id) }}">Baixar PDF</a>
-        <a class="btn btn-outline-dark" href="{{ url_for('ver_gabarito_avaliacao', avaliacao_id=avaliacao.id) }}">Gabarito</a>
-        <a class="btn btn-outline-success" href="{{ url_for('preteste_folha', avaliacao_id=avaliacao.id) }}">Testar folha</a>
-        <form method="post" action="{{ url_for('gerar_segunda_chamada', avaliacao_id=avaliacao.id) }}" class="d-inline">
-            <button class="btn btn-warning" type="submit">Gerar 2ª chamada</button>
-        </form>
-        <a class="btn btn-success" href="{{ url_for('selecionar_alunos_avaliacao', avaliacao_id=avaliacao.id) }}">Gerar folhas</a>
-    </div>
+    <div class="d-flex flex-wrap gap-2"><a class="btn btn-outline-secondary" href="{{ url_for('editar_avaliacao', avaliacao_id=avaliacao.id) }}">Revisar</a><a class="btn btn-outline-warning" href="{{ url_for('melhorar_avaliacao', avaliacao_id=avaliacao.id) }}">Melhorar prova</a><a class="btn btn-outline-primary" href="{{ url_for('baixar_pdf_avaliacao', avaliacao_id=avaliacao.id) }}">Baixar PDF</a><a class="btn btn-outline-dark" href="{{ url_for('ver_gabarito_avaliacao', avaliacao_id=avaliacao.id) }}">Gabarito</a><a class="btn btn-success" href="{{ url_for('selecionar_alunos_avaliacao', avaliacao_id=avaliacao.id) }}">Gerar folhas</a></div>
 </div>
 <div class="card atlas-card mb-4"><div class="card-body p-4">
     <h1 class="text-center fw-bold">{{ avaliacao.titulo }}</h1>

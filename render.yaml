@@ -9,5 +9,3 @@ services:
         generateValue: true
       - key: MODELO_GEMINI
         value: gemini-2.0-flash
-      # Configure DATABASE_URL no painel do Render apontando para PostgreSQL.
-      # Não coloque usuário/senha do banco direto no GitHub.

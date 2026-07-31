@@ -7,9 +7,8 @@
         <p class="atlas-subtitle mb-0">{{ relatorio.avaliacao.titulo }} · {{ relatorio.avaliacao.materias }}</p>
     </div>
     <div class="d-flex gap-2 no-print">
-        <a class="btn btn-outline-success" href="{{ url_for('exportar_diario_classe', avaliacao_id=relatorio.avaliacao.id) }}">Exportar diário CSV</a>
-        <a class="btn btn-outline-primary" href="{{ url_for('devolutivas_pdf', avaliacao_id=relatorio.avaliacao.id) }}">Devolutivas PDF</a>
         <button class="btn btn-outline-secondary" onclick="window.print()">Imprimir relatório</button>
+        <a class="btn btn-outline-success" href="{{ url_for('exportar_diario_classe', avaliacao_id=relatorio.avaliacao.id) }}">Exportar diário CSV</a>
         <a class="btn btn-atlas" href="{{ url_for('home') }}">Voltar</a>
     </div>
 </div>
@@ -21,31 +20,6 @@
     <div class="col-md-2"><div class="metric"><div class="small-muted">Menor</div><div class="value">{{ relatorio.menor }}%</div></div></div>
     <div class="col-md-2"><div class="metric"><div class="small-muted">Desvio</div><div class="value">{{ relatorio.desvio }}</div></div></div>
     <div class="col-md-2"><div class="metric"><div class="small-muted">Críticas</div><div class="value">{{ relatorio.questoes_criticas|length }}</div></div></div>
-</div>
-
-<div class="row g-4 mb-4">
-    <div class="col-lg-7">
-        <div class="card atlas-card"><div class="card-body p-4">
-            <h2 class="atlas-title h4">Anulação de questão em massa</h2>
-            <p class="small-muted">Use quando uma questão tiver erro, duas alternativas corretas ou gabarito incorreto. O Atlas remove a questão do cálculo e recalcula todas as notas automaticamente.</p>
-            <form method="post" action="{{ url_for('anular_questao_massa', avaliacao_id=relatorio.avaliacao.id) }}" class="row g-2 align-items-end">
-                <div class="col-md-3"><label class="form-label">Questão</label><input class="form-control" type="number" name="questao" min="1" max="{{ relatorio.avaliacao.total_questoes }}" required></div>
-                <div class="col-md-5"><label class="form-label">Motivo</label><input class="form-control" name="motivo" placeholder="Ex.: gabarito errado"></div>
-                <div class="col-md-2"><button class="btn btn-danger w-100" name="acao" value="anular">Anular</button></div>
-                <div class="col-md-2"><button class="btn btn-outline-secondary w-100" name="acao" value="restaurar">Restaurar</button></div>
-            </form>
-        </div></div>
-    </div>
-    <div class="col-lg-5">
-        <div class="card atlas-card"><div class="card-body p-4">
-            <h2 class="atlas-title h4">Questões anuladas</h2>
-            {% if relatorio.questoes_anuladas %}
-                <div class="d-flex flex-wrap gap-2">
-                {% for q, motivo in relatorio.questoes_anuladas.items() %}<span class="badge text-bg-danger p-2">Q{{ q }}{% if motivo %} · {{ motivo }}{% endif %}</span>{% endfor %}
-                </div>
-            {% else %}<p class="small-muted mb-0">Nenhuma questão anulada.</p>{% endif %}
-        </div></div>
-    </div>
 </div>
 
 <div class="row g-4">
@@ -88,28 +62,15 @@
     </div>
 </div></div>
 
-
-<div class="card atlas-card mb-4"><div class="card-body p-4">
-    <h2 class="atlas-title h4">Controle automático de faltosos</h2>
-    {% if relatorio.faltosos %}
-        <div class="alert alert-warning mb-3">{{ relatorio.corrigidas }} de {{ relatorio.total_folhas }} folha(s) corrigida(s). Faltam {{ relatorio.faltosos|length }} aluno(s).</div>
-        <div class="d-flex flex-wrap gap-2">
-        {% for f in relatorio.faltosos %}<span class="badge text-bg-warning p-2">{{ f.aluno_nome }} · {{ f.turma }}</span>{% endfor %}
-        </div>
-    {% else %}
-        <div class="alert alert-success mb-0">Todos os alunos com folha gerada já possuem correção.</div>
-    {% endif %}
-</div></div>
-
 <div class="card atlas-card"><div class="card-body p-4">
     <h2 class="atlas-title h4">Alunos corrigidos</h2>
     <div class="table-responsive">
         <table class="table table-hover align-middle">
-            <thead><tr><th>Aluno</th><th>Turma</th><th>Nota</th><th>Acertos</th><th>Erros</th><th>Anuladas/branco</th></tr></thead>
+            <thead><tr><th>Aluno</th><th>Turma</th><th>Nota</th><th>Acertos</th><th>Erros</th><th>Anuladas/branco</th><th></th></tr></thead>
             <tbody>
             {% for item in relatorio.alunos_resultados %}
-                <tr><td>{{ item.linha.aluno_nome }}</td><td>{{ item.linha.turma }}</td><td><strong>{{ item.linha.nota_percentual }}%</strong></td><td>{{ item.resumo.acertos }}</td><td>{{ item.resumo.erros }}</td><td>{{ item.resumo.anuladas_ou_em_branco }}</td></tr>
-            {% else %}<tr><td colspan="6" class="text-muted">Nenhum resultado corrigido para essa avaliação.</td></tr>{% endfor %}
+                <tr><td>{{ item.linha.aluno_nome }}</td><td>{{ item.linha.turma }}</td><td><strong>{{ item.linha.nota_percentual }}%</strong></td><td>{{ item.resumo.acertos }}</td><td>{{ item.resumo.erros }}</td><td>{{ item.resumo.anuladas_ou_em_branco }}</td><td><a class="btn btn-sm btn-outline-warning" href="{{ url_for('revisar_resultado', resultado_id=item.linha.id) }}">Revisar</a></td></tr>
+            {% else %}<tr><td colspan="7" class="text-muted">Nenhum resultado corrigido para essa avaliação.</td></tr>{% endfor %}
             </tbody>
         </table>
     </div>

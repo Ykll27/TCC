@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Atlas - Revisão manual{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+    <div><h1 class="atlas-title">Revisão manual</h1><p class="atlas-subtitle mb-0">{{ resultado.aluno_nome }} · {{ resultado.prova_titulo }}</p></div>
+    <a class="btn btn-outline-secondary" href="{{ url_for('ver_resultado_detalhado', resultado_id=resultado.id) }}">Cancelar</a>
+</div>
+<form method="POST" class="card atlas-card"><div class="card-body p-4">
+    <div class="alert alert-warning">Ajuste apenas as questões com rasura, marcação fraca ou leitura duvidosa. Ao salvar, a nota é recalculada automaticamente.</div>
+    {% set respostas = dados.gabarito_aluno_extraido or {} %}
+    <div class="table-responsive"><table class="table align-middle">
+        <thead><tr><th>Questão</th><th>Resposta atual</th><th>Correta</th><th>Nova resposta</th></tr></thead>
+        <tbody>{% for q, correta in gabarito.items() %}<tr><td>{{ q }}</td><td>{{ respostas.get(q, 'NULA') }}</td><td>{{ correta }}</td><td><select class="form-select form-select-sm" name="q{{ q }}">{% for alt in ['A','B','C','D','E','NULA'] %}<option value="{{ alt }}" {% if respostas.get(q, 'NULA') == alt %}selected{% endif %}>{{ alt }}</option>{% endfor %}</select></td></tr>{% endfor %}</tbody>
+    </table></div>
+    <label class="form-label">Observação da revisão</label>
+    <textarea class="form-control" name="observacao" rows="2" placeholder="Ex.: Q7 estava rasurada; professor confirmou alternativa C."></textarea>
+    <div class="mt-3"><button class="btn btn-warning" type="submit">Salvar revisão e recalcular</button></div>
+</div></form>
+{% endblock %}

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Atlas - Prova personalizada{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4 no-print">
+    <div><h1 class="atlas-title">Prova personalizada</h1><p class="atlas-subtitle mb-0">{{ prova.aluno_nome }} · {{ prova.turma }} · {{ avaliacao.titulo }}</p></div>
+    <div class="d-flex gap-2"><button class="btn btn-outline-secondary" onclick="window.print()">Imprimir</button><a class="btn btn-atlas" href="{{ url_for('folha', prova_id=prova.id) }}">Folha de resposta</a></div>
+</div>
+<div class="card atlas-card mb-4"><div class="card-body p-4">
+    <h1 class="text-center fw-bold">{{ avaliacao.titulo }}</h1>
+    <p><strong>Aluno:</strong> {{ prova.aluno_nome }} · <strong>Turma:</strong> {{ prova.turma }} · <strong>Matrícula:</strong> {{ prova.matricula }}</p>
+    <p><strong>Disciplina:</strong> {{ avaliacao.materias }} · <strong>Versão:</strong> #{{ prova.id }}</p>
+    <div class="alert alert-light border mb-0">Esta prova pode ter ordem de questões personalizada. Responda usando a folha de respostas com o mesmo QR Code.</div>
+</div></div>
+{% for q in questoes %}
+<div class="card atlas-card mb-3"><div class="card-body p-4">
+    <div class="small-muted mb-2">Questão {{ "%02d"|format(q.numero|int) }}{% if q.numero_original != q.numero %} · original {{ q.numero_original }}{% endif %} · {{ q.area }} · {{ q.tema }}</div>
+    {% if q.contexto %}<p>{{ q.contexto }}</p>{% endif %}
+    <p><strong>{{ q.enunciado }}</strong></p>
+    <ol type="A" class="mb-0">{% for alt in ['A','B','C','D','E'] %}<li class="mb-2">{{ q.alternativas[alt] }}</li>{% endfor %}</ol>
+</div></div>
+{% endfor %}
+{% endblock %}

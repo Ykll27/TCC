@@ -3,7 +3,7 @@
 {% block content %}
 <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
     <div><h1 class="atlas-title">Detalhe da correção</h1><p class="atlas-subtitle mb-0">{{ resultado.aluno_nome }} · {{ resultado.prova_titulo }}</p></div>
-    <a class="btn btn-atlas no-print" href="{{ url_for('home') }}">Voltar</a>
+    <div class="d-flex gap-2 no-print"><a class="btn btn-outline-warning" href="{{ url_for('revisar_resultado', resultado_id=resultado.id) }}">Revisar manualmente</a><a class="btn btn-atlas" href="{{ url_for('home') }}">Voltar</a></div>
 </div>
 <div class="row g-3 mb-4">
     <div class="col-md-3"><div class="metric"><div class="small-muted">Nota</div><div class="value">{{ resultado.nota_percentual }}%</div></div></div>

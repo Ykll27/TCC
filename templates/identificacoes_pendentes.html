@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Atlas - Identificação assistida{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+    <div><h1 class="atlas-title">Identificação assistida</h1><p class="atlas-subtitle mb-0">Folhas que não puderam ser salvas automaticamente porque o QR falhou ou estava inválido.</p></div>
+    <a class="btn btn-atlas" href="{{ url_for('scan_tempo_real') }}">Voltar ao Scan</a>
+</div>
+<div class="card atlas-card"><div class="card-body p-4">
+    <div class="table-responsive"><table class="table table-hover align-middle">
+        <thead><tr><th>ID</th><th>Origem</th><th>Prova base</th><th>Mensagem</th><th>Data</th><th></th></tr></thead>
+        <tbody>{% for p in pendentes %}<tr><td>#{{ p.id }}</td><td>{{ p.origem }}</td><td>{{ p.prova_base_titulo or '-' }}</td><td>{{ p.mensagem }}</td><td>{{ p.criado_em }}</td><td><a class="btn btn-sm btn-outline-warning" href="{{ url_for('resolver_identificacao_pendente', pendente_id=p.id) }}">Resolver</a></td></tr>{% else %}<tr><td colspan="6" class="text-muted">Nenhuma pendência de identificação.</td></tr>{% endfor %}</tbody>
+    </table></div>
+</div></div>
+{% endblock %}

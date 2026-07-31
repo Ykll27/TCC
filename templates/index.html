@@ -1,187 +1,158 @@
 {% extends "base.html" %}
 {% block title %}Atlas - Painel{% endblock %}
 {% block content %}
-<div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
-    <div>
-        <h1 class="atlas-page-title">Painel</h1>
-        <p class="atlas-page-subtitle mb-0">Fluxo principal: criar prova, gerar folhas, corrigir e analisar resultados.</p>
-    </div>
-    <div class="d-flex flex-wrap gap-2 no-print">
-        <a class="btn btn-soft" href="{{ url_for('alunos_pagina') }}"><i class="bi bi-people me-1"></i> Alunos</a>
-        <a class="btn btn-soft" href="{{ url_for('scan_tempo_real') }}"><i class="bi bi-camera me-1"></i> Iniciar Scan</a>
-        <a class="btn btn-atlas" href="#nova-prova"><i class="bi bi-plus-lg me-1"></i> Nova prova</a>
-    </div>
-</div>
-
-<div class="row g-3 mb-4">
-    <div class="col-6 col-xl-3" data-search-item>
-        <div class="metric d-flex justify-content-between align-items-start">
-            <div><div class="label">Avaliações</div><div class="value">{{ avaliacoes|length }}</div></div>
-            <div class="metric-icon"><i class="bi bi-file-earmark-text"></i></div>
+<div class="atlas-hero p-4 p-lg-5 mb-4">
+    <div class="row align-items-center g-4">
+        <div class="col-lg-8">
+            <span class="badge badge-soft rounded-pill mb-3">IA mínima · OpenCV · QR Code · Bootstrap</span>
+            <h1 class="atlas-title display-6 mb-2">Atlas</h1>
+            <p class="lead atlas-subtitle mb-0">Crie avaliações, gere folhas personalizadas, corrija por câmera/upload e acompanhe o desempenho da turma com menos dependência de IA.</p>
+        </div>
+        <div class="col-lg-4">
+            <div class="row g-2 text-center">
+                <div class="col-4"><div class="metric"><div class="value">{{ avaliacoes|length }}</div><div class="small-muted">Provas</div></div></div>
+                <div class="col-4"><div class="metric"><div class="value">{{ alunos|length }}</div><div class="small-muted">Alunos</div></div></div>
+                <div class="col-4"><div class="metric"><div class="value">{{ resultados|length }}</div><div class="small-muted">Notas</div></div></div>
+            </div>
         </div>
     </div>
-    <div class="col-6 col-xl-3" data-search-item>
-        <div class="metric d-flex justify-content-between align-items-start">
-            <div><div class="label">Alunos</div><div class="value">{{ alunos|length }}</div></div>
-            <div class="metric-icon"><i class="bi bi-people"></i></div>
-        </div>
-    </div>
-    <div class="col-6 col-xl-3" data-search-item>
-        <div class="metric d-flex justify-content-between align-items-start">
-            <div><div class="label">Folhas</div><div class="value">{{ provas|length }}</div></div>
-            <div class="metric-icon"><i class="bi bi-ui-checks-grid"></i></div>
-        </div>
-    </div>
-    <div class="col-6 col-xl-3" data-search-item>
-        <div class="metric d-flex justify-content-between align-items-start">
-            <div><div class="label">Correções</div><div class="value">{{ resultados|length }}</div></div>
-            <div class="metric-icon"><i class="bi bi-check2-circle"></i></div>
-        </div>
-    </div>
-</div>
-
-<div class="atlas-tabs-card mb-4" data-search-item>
-    <a class="atlas-tab-card active" href="{{ url_for('estrutura') }}">
-        <span class="atlas-tab-icon"><i class="bi bi-diagram-3"></i></span>
-        <span><strong>Estrutura</strong><br><small class="text-muted">Turmas e organização</small></span>
-        <span class="atlas-tab-count">{{ turmas|length }}</span>
-    </a>
-    <a class="atlas-tab-card" href="{{ url_for('avaliacoes_pagina') }}">
-        <span class="atlas-tab-icon"><i class="bi bi-file-earmark-text"></i></span>
-        <span><strong>Provas</strong><br><small class="text-muted">Avaliações abertas</small></span>
-        <span class="atlas-tab-count">{{ avaliacoes|length }}</span>
-    </a>
-    <a class="atlas-tab-card" href="{{ url_for('scan_tempo_real') }}">
-        <span class="atlas-tab-icon"><i class="bi bi-camera"></i></span>
-        <span><strong>Scan</strong><br><small class="text-muted">Correção por câmera</small></span>
-        <span class="atlas-tab-count">{{ resultados|length }}</span>
-    </a>
 </div>
 
 <div class="row g-4">
-    <div class="col-xl-7">
-        <div class="atlas-panel mb-4" id="nova-prova" data-search-item>
-            <div class="d-flex align-items-start justify-content-between gap-3 mb-3">
-                <div>
-                    <h2 class="atlas-section-title">Nova avaliação</h2>
-                    <p class="small-muted mb-0">Criação rápida com banco local primeiro. A IA só entra se você permitir.</p>
-                </div>
-                <span class="badge badge-soft">Uso principal</span>
-            </div>
-            <form method="POST" action="{{ url_for('gerar_prova_automatica') }}" class="row g-3">
-                <div class="col-md-7">
-                    <label class="form-label">Título</label>
-                    <input name="titulo_auto" class="form-control" value="Simulado Modelo ENEM" required />
-                </div>
-                <div class="col-md-5">
-                    <label class="form-label">Questões</label>
-                    <input name="total_questoes_auto" type="number" class="form-control" value="10" min="1" max="90" required />
-                </div>
-                <div class="col-md-6">
-                    <label class="form-label">Matéria</label>
-                    <input name="materias_auto" class="form-control" placeholder="Ex.: Matemática" required />
-                </div>
-                <div class="col-md-6">
-                    <label class="form-label">Tema</label>
-                    <input name="temas_auto" class="form-control" placeholder="Ex.: Funções, Ecologia..." />
-                </div>
-                <div class="col-12">
-                    <label class="form-label">Observações da prova</label>
-                    <textarea name="especificacoes_auto" rows="3" class="form-control" placeholder="Nível, conteúdos obrigatórios, estilo de questão e observações."></textarea>
-                </div>
-                <div class="col-12 d-flex flex-wrap justify-content-between align-items-center gap-3">
-                    <div class="form-check form-switch m-0">
-                        <input class="form-check-input" type="checkbox" name="permitir_ia_auto" id="permitirIA">
-                        <label class="form-check-label fw-bold" for="permitirIA">Permitir IA se o banco local não for suficiente</label>
+    <div class="col-lg-7">
+        <div class="card atlas-card mb-4">
+            <div class="card-body p-4">
+                <div class="d-flex align-items-start gap-3 mb-3">
+                    <span class="step-badge">1</span>
+                    <div>
+                        <h2 class="atlas-title h4 mb-1">Criar prova</h2>
+                        <p class="small-muted mb-0">O Atlas usa primeiro o banco local/cache. A IA só entra quando você permitir e quando melhorar a eficácia.</p>
                     </div>
-                    <button class="btn btn-atlas px-4" type="submit"><i class="bi bi-magic me-1"></i> Gerar avaliação</button>
                 </div>
-            </form>
+                <form method="POST" action="{{ url_for('gerar_prova_automatica') }}" class="row g-3">
+                    <div class="col-md-6"><label class="form-label">Título</label><input name="titulo_auto" class="form-control" value="Simulado Modelo ENEM" required /></div>
+                    <div class="col-md-6"><label class="form-label">Matérias</label><input name="materias_auto" class="form-control" placeholder="Matemática, História..." required /></div>
+                    <div class="col-md-8"><label class="form-label">Temas/conteúdos</label><input name="temas_auto" class="form-control" placeholder="Ecologia, funções, interpretação..." /></div>
+                    <div class="col-md-4"><label class="form-label">Questões</label><input name="total_questoes_auto" type="number" class="form-control" value="10" min="1" max="90" required /></div>
+                    <div class="col-12"><label class="form-label">Especificações</label><textarea name="especificacoes_auto" rows="3" class="form-control" placeholder="Nível, estilo, restrições, competências, observações..."></textarea></div>
+                    <div class="col-12">
+                        <div class="form-check form-switch border rounded-4 p-3 ps-5 bg-light">
+                            <input class="form-check-input" type="checkbox" name="permitir_ia_auto" id="permitirIA">
+                            <label class="form-check-label" for="permitirIA"><strong>Permitir IA apenas se necessário</strong></label>
+                            <div class="small-muted">Deixe desligado para máxima velocidade/economia. Ligue quando a prova exigir questões mais originais ou específicas.</div>
+                        </div>
+                    </div>
+                    <div class="col-12 d-flex flex-wrap gap-2">
+                        <button class="btn btn-atlas" type="submit">Gerar avaliação</button>
+                        <a class="btn btn-outline-primary" href="{{ url_for('scan_tempo_real') }}">Abrir Scan em tempo real</a>
+                    </div>
+                </form>
+            </div>
         </div>
 
-        <div class="atlas-panel mb-4" data-search-item>
-            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-                <div>
-                    <h2 class="atlas-section-title">Avaliações recentes</h2>
-                    <p class="small-muted mb-0">Ações rápidas no fluxo mais usado.</p>
+        <div class="card atlas-card mb-4">
+            <div class="card-body p-4">
+                <div class="d-flex align-items-start gap-3 mb-3">
+                    <span class="step-badge">2</span>
+                    <div><h2 class="atlas-title h4 mb-1">Alunos e turmas</h2><p class="small-muted mb-0">Cadastre manualmente ou importe uma planilha CSV.</p></div>
                 </div>
-                <a class="btn btn-sm btn-soft" href="{{ url_for('avaliacoes_pagina') }}">Ver todas</a>
-            </div>
-            <div class="d-grid">
-                {% for avaliacao in avaliacoes[:5] %}
-                <div class="list-row" data-search-item>
-                    <div class="row-icon"><i class="bi bi-file-earmark-text"></i></div>
-                    <div>
-                        <strong>{{ avaliacao.titulo }}</strong>
-                        <div class="small-muted">{{ avaliacao.materias }} · {{ avaliacao.total_questoes }} questões</div>
-                    </div>
-                    <div class="row-actions no-print">
-                        <a class="btn btn-sm btn-soft" href="{{ url_for('ver_avaliacao', avaliacao_id=avaliacao.id) }}">Abrir</a>
-                        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('selecionar_alunos_avaliacao', avaliacao_id=avaliacao.id) }}">Folhas</a>
-                        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('relatorio_avaliacao', avaliacao_id=avaliacao.id) }}">Relatório</a>
-                    </div>
+                <form class="row g-2 mb-3" method="POST" action="{{ url_for('criar_aluno_rota') }}">
+                    <div class="col-md-4"><input class="form-control" name="nome" placeholder="Nome do aluno" required /></div>
+                    <div class="col-md-3"><input class="form-control" name="matricula" placeholder="Matrícula/RA" required /></div>
+                    <div class="col-md-3"><input class="form-control" name="turma" placeholder="Turma" required /></div>
+                    <div class="col-md-2"><button class="btn btn-outline-primary w-100" type="submit">Adicionar</button></div>
+                </form>
+                <form class="d-flex flex-wrap gap-2 align-items-center mb-3" method="POST" enctype="multipart/form-data" action="{{ url_for('importar_alunos_csv') }}">
+                    <input class="form-control" style="max-width:360px" type="file" name="arquivo_csv" accept=".csv,text/csv" required />
+                    <button class="btn btn-outline-secondary" type="submit">Importar CSV</button>
+                    <span class="small-muted">Cabeçalho aceito: nome,turma,matricula</span>
+                </form>
+                <div class="table-responsive" style="max-height:280px;overflow:auto">
+                    <table class="table table-sm align-middle">
+                        <thead><tr><th>Aluno</th><th>Matrícula</th><th>Turma</th></tr></thead>
+                        <tbody>{% for aluno in alunos %}<tr><td>{{ aluno.nome }}</td><td>{{ aluno.matricula }}</td><td>{{ aluno.turma }}</td></tr>{% else %}<tr><td colspan="3" class="text-muted">Nenhum aluno cadastrado.</td></tr>{% endfor %}</tbody>
+                    </table>
                 </div>
-                {% else %}
-                <div class="empty-state">Nenhuma avaliação criada ainda. Comece pelo formulário acima.</div>
-                {% endfor %}
             </div>
         </div>
     </div>
 
-    <div class="col-xl-5">
-        <div class="atlas-panel mb-4" data-search-item>
-            <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
-                <div>
-                    <h2 class="atlas-section-title">Correção rápida</h2>
-                    <p class="small-muted mb-0">Use Scan para câmera ou envie folhas por upload com QR obrigatório.</p>
+    <div class="col-lg-5">
+        <div class="card atlas-card mb-4">
+            <div class="card-body p-4">
+                <h2 class="atlas-title h4">Fila de geração</h2>
+                {% if tarefas %}
+                <div class="list-group list-group-flush">
+                    {% for tarefa in tarefas %}
+                    <a class="list-group-item list-group-item-action px-0" href="{{ url_for('status_tarefa', tarefa_id=tarefa.id) }}">
+                        <div class="d-flex justify-content-between"><strong>#{{ tarefa.id }} · {{ tarefa.status }}</strong><span>{{ tarefa.progresso or 0 }}%</span></div>
+                        <div class="progress my-2" style="height:8px"><div class="progress-bar" style="width:{{ tarefa.progresso or 0 }}%"></div></div>
+                        <div class="small-muted">{{ tarefa.mensagem or '-' }}</div>
+                    </a>
+                    {% endfor %}
                 </div>
-                <a href="{{ url_for('scan_tempo_real') }}" class="btn btn-atlas btn-sm"><i class="bi bi-camera me-1"></i> Scan</a>
+                {% else %}<p class="small-muted mb-0">Nenhum pedido recente.</p>{% endif %}
             </div>
-            {% if provas %}
-            <form action="{{ url_for('corrigir') }}" method="POST" enctype="multipart/form-data" class="d-grid gap-3">
-                <select name="prova_id" class="form-select" required>
-                    {% for prova in provas %}<option value="{{ prova.id }}">{{ prova.titulo }} — {{ prova.aluno_nome }}</option>{% endfor %}
-                </select>
-                <input class="form-control" type="file" name="folhas" accept="image/*,.pdf" multiple required />
-                <div class="alert alert-light border small mb-0"><strong>Segurança:</strong> sem QR válido o Atlas não salva nota no aluno errado; envia para identificação assistida.</div>
-                <button class="btn btn-soft" type="submit"><i class="bi bi-upload me-1"></i> Corrigir arquivos</button>
-            </form>
-            {% else %}
-            <div class="empty-state">Gere folhas de resposta antes de corrigir.</div>
-            {% endif %}
         </div>
 
-        <div class="atlas-panel mb-4" data-search-item>
-            <div class="d-flex justify-content-between align-items-center mb-3">
-                <h2 class="atlas-section-title">Alunos rápidos</h2>
-                <a class="btn btn-sm btn-soft" href="{{ url_for('alunos_pagina') }}">Gerenciar</a>
+        <div class="card atlas-card mb-4">
+            <div class="card-body p-4">
+                <h2 class="atlas-title h4">Corrigir por upload</h2>
+                {% if provas %}
+                <form action="{{ url_for('corrigir') }}" method="POST" enctype="multipart/form-data" class="d-grid gap-3">
+                    <select name="prova_id" class="form-select" required>
+                        {% for prova in provas %}<option value="{{ prova.id }}">#{{ prova.id }} - {{ prova.titulo }} - {{ prova.aluno_nome }}</option>{% endfor %}
+                    </select>
+                    <input class="form-control" type="file" name="folhas" accept="image/*,.pdf" multiple required />
+                    <button class="btn btn-success" type="submit">Corrigir arquivos</button>
+                    <div class="small-muted">O QR da folha é obrigatório para salvar automaticamente. Se falhar, a imagem vai para Identificação Assistida.</div>
+                </form>
+                {% else %}<p class="small-muted mb-0">Gere folhas de resposta antes de corrigir.</p>{% endif %}
             </div>
-            <form class="row g-2" method="POST" action="{{ url_for('criar_aluno_rota') }}">
-                <div class="col-12"><input class="form-control" name="nome" placeholder="Nome do aluno" required /></div>
-                <div class="col-6"><input class="form-control" name="matricula" placeholder="Matrícula/RA" required /></div>
-                <div class="col-6"><input class="form-control" name="turma" placeholder="Turma" required /></div>
-                <div class="col-12"><button class="btn btn-soft w-100" type="submit"><i class="bi bi-plus-lg me-1"></i> Adicionar aluno</button></div>
-            </form>
         </div>
+    </div>
+</div>
 
-        <div class="atlas-panel" data-search-item>
-            <h2 class="atlas-section-title mb-3">Resultados recentes</h2>
-            <div class="d-grid">
-                {% for r in resultados[:6] %}
-                <div class="list-row" data-search-item>
-                    <div class="row-icon"><i class="bi bi-check2-circle"></i></div>
-                    <div>
-                        <strong>{{ r.aluno_nome or 'Aluno não identificado' }}</strong>
-                        <div class="small-muted">{{ r.prova_titulo }} · {{ r.criado_em }}</div>
-                    </div>
-                    <div class="row-actions">
-                        <span class="badge {% if r.status_confianca == 'revisao' %}badge-warning-soft{% else %}badge-success-soft{% endif %}">{{ r.nota_percentual }}%</span>
-                    </div>
-                </div>
-                {% else %}
-                <div class="empty-state">Nenhuma correção registrada ainda.</div>
-                {% endfor %}
-            </div>
+<div class="card atlas-card mb-4">
+    <div class="card-body p-4">
+        <h2 class="atlas-title h4">Avaliações</h2>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead><tr><th>ID</th><th>Título</th><th>Matérias</th><th>Questões</th><th>Status</th><th>Ações</th></tr></thead>
+                <tbody>
+                {% for avaliacao in avaliacoes %}
+                <tr>
+                    <td>#{{ avaliacao.id }}</td><td>{{ avaliacao.titulo }}</td><td>{{ avaliacao.materias }}</td><td>{{ avaliacao.total_questoes }}</td><td><span class="badge text-bg-light">{{ avaliacao.status_revisao or 'rascunho' }}</span></td>
+                    <td class="d-flex flex-wrap gap-1">
+                        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('ver_avaliacao', avaliacao_id=avaliacao.id) }}">Abrir</a>
+                        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('editar_avaliacao', avaliacao_id=avaliacao.id) }}">Revisar</a>
+                        <a class="btn btn-sm btn-outline-warning" href="{{ url_for('melhorar_avaliacao', avaliacao_id=avaliacao.id) }}">Melhorar</a>
+                        <a class="btn btn-sm btn-outline-dark" href="{{ url_for('ver_gabarito_avaliacao', avaliacao_id=avaliacao.id) }}">Gabarito</a>
+                        <a class="btn btn-sm btn-outline-success" href="{{ url_for('selecionar_alunos_avaliacao', avaliacao_id=avaliacao.id) }}">Folhas</a>
+                        <a class="btn btn-sm btn-outline-info" href="{{ url_for('relatorio_avaliacao', avaliacao_id=avaliacao.id) }}">Relatório</a>
+                    </td>
+                </tr>
+                {% else %}<tr><td colspan="6" class="text-muted">Nenhuma avaliação gerada.</td></tr>{% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="card atlas-card">
+    <div class="card-body p-4">
+        <h2 class="atlas-title h4">Resultados recentes</h2>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead><tr><th>Aluno</th><th>Prova</th><th>Nota</th><th>Status</th><th>Data</th><th></th></tr></thead>
+                <tbody>
+                {% for r in resultados %}
+                <tr>
+                    <td>{{ r.aluno_nome or 'Aluno não identificado' }}</td><td>{{ r.prova_titulo }}</td><td><strong>{{ r.nota_percentual }}%</strong></td><td><span class="badge {% if r.status_confianca == 'revisao' %}text-bg-warning{% else %}text-bg-success{% endif %}">{{ r.status_confianca or 'confiavel' }}</span></td><td>{{ r.criado_em }}</td><td class="d-flex flex-wrap gap-1"><a class="btn btn-sm btn-outline-primary" href="{{ url_for('ver_resultado_detalhado', resultado_id=r.id) }}">Detalhes</a><a class="btn btn-sm btn-outline-warning" href="{{ url_for('revisar_resultado', resultado_id=r.id) }}">Revisar</a></td>
+                </tr>
+                {% else %}<tr><td colspan="6" class="text-muted">Nenhum resultado ainda.</td></tr>{% endfor %}
+                </tbody>
+            </table>
         </div>
     </div>
 </div>
