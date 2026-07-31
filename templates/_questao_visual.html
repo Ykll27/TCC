@@ -1,0 +1,60 @@
+{% set v = q.elemento_visual if q.elemento_visual is mapping else {} %}
+{% if v %}
+<div class="border rounded-4 p-3 my-3 bg-light-subtle questao-visual">
+    <div class="d-flex justify-content-between gap-2 align-items-start mb-2">
+        <strong>{{ v.titulo or 'Elemento visual' }}</strong>
+        <span class="badge text-bg-light">{{ (v.tipo or 'visual')|replace('_', ' ') }}</span>
+    </div>
+    {% if v.descricao %}<p class="small-muted mb-2">{{ v.descricao }}</p>{% endif %}
+
+    {% if v.tipo == 'tabela' %}
+        <div class="table-responsive">
+            <table class="table table-sm table-bordered bg-white mb-2 align-middle">
+                {% if v.colunas %}
+                <thead><tr>{% for c in v.colunas %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+                {% endif %}
+                <tbody>
+                    {% for linha in v.linhas %}
+                    <tr>{% for cel in linha %}<td>{{ cel }}</td>{% endfor %}</tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% elif v.tipo in ['grafico_barras', 'grafico_linha'] %}
+        {% set ns = namespace(maxv=1) %}
+        {% for item in v.dados %}
+            {% if item.valor and item.valor > ns.maxv %}{% set ns.maxv = item.valor %}{% endif %}
+        {% endfor %}
+        <div class="bg-white rounded-3 border p-3 mb-2">
+            {% for item in v.dados %}
+            {% set largura = ((item.valor or 0) / ns.maxv * 100) if ns.maxv else 0 %}
+            <div class="mb-2">
+                <div class="d-flex justify-content-between small mb-1"><span>{{ item.rotulo }}</span><strong>{{ item.valor }}</strong></div>
+                <div class="progress" style="height: 10px;"><div class="progress-bar" style="width: {{ largura|round(0) }}%"></div></div>
+            </div>
+            {% endfor %}
+            <div class="small-muted">{{ v.eixo_x or 'Categorias' }} × {{ v.eixo_y or 'Valor' }}</div>
+        </div>
+    {% else %}
+        <div class="bg-white border rounded-3 p-3 mb-2">
+            <div class="d-flex flex-wrap gap-2 align-items-center">
+                {% for item in v.itens %}
+                    <span class="badge text-bg-primary bg-opacity-75 p-2">{{ item }}</span>
+                    {% if not loop.last %}<span class="text-muted">→</span>{% endif %}
+                {% else %}
+                    <span class="small-muted">Figura esquemática gerada pelo Atlas a partir da descrição do enunciado.</span>
+                {% endfor %}
+            </div>
+        </div>
+    {% endif %}
+    <div class="small text-muted">Fonte: {{ v.fonte or 'Elaboração própria/Atlas' }}</div>
+</div>
+{% endif %}
+
+{% set calc = q.dados_calculo if q.dados_calculo is mapping else {} %}
+{% if calc %}
+<div class="alert alert-light border rounded-4 py-2 px-3 my-2">
+    {% if calc.formula %}<div><strong>Dados/fórmula de apoio:</strong> {{ calc.formula }}</div>{% endif %}
+    {% if calc.valores %}<div class="small-muted">{% for k, val in calc.valores.items() %}<span class="me-3">{{ k }} = {{ val }}</span>{% endfor %}</div>{% endif %}
+</div>
+{% endif %}

@@ -13,10 +13,17 @@
             <div class="col-md-4"><label class="form-label">Área/matéria</label><input class="form-control" name="q{{ q.numero }}_area" value="{{ q.area }}" /></div>
             <div class="col-md-4"><label class="form-label">Tema/conteúdo</label><input class="form-control" name="q{{ q.numero }}_tema" value="{{ q.tema }}" /></div>
             <div class="col-md-4"><label class="form-label">Resposta correta</label><select class="form-select" name="q{{ q.numero }}_correta">{% for alt in ['A','B','C','D','E'] %}<option value="{{ alt }}" {% if q.correta == alt %}selected{% endif %}>{{ alt }}</option>{% endfor %}</select></div>
+            <div class="col-md-4"><label class="form-label">Dificuldade</label><select class="form-select" name="q{{ q.numero }}_dificuldade"><option value="facil" {% if q.dificuldade == 'facil' %}selected{% endif %}>Fácil</option><option value="medio" {% if q.dificuldade == 'medio' or not q.dificuldade %}selected{% endif %}>Médio</option><option value="dificil" {% if q.dificuldade == 'dificil' %}selected{% endif %}>Difícil</option></select></div>
+            <div class="col-md-4"><label class="form-label">Tipo</label><input class="form-control" name="q{{ q.numero }}_tipo_questao" value="{{ q.tipo_questao or '' }}" placeholder="calculo, grafico, tabela..." /></div>
+            <div class="col-md-4"><label class="form-label">Competência</label><input class="form-control" name="q{{ q.numero }}_competencia" value="{{ q.competencia or '' }}" /></div>
             <div class="col-12"><label class="form-label">Habilidade</label><input class="form-control" name="q{{ q.numero }}_habilidade" value="{{ q.habilidade }}" /></div>
             <div class="col-12"><label class="form-label">Contexto/texto-base</label><textarea class="form-control" rows="2" name="q{{ q.numero }}_contexto">{{ q.contexto }}</textarea></div>
             <div class="col-12"><label class="form-label">Enunciado</label><textarea class="form-control" rows="2" name="q{{ q.numero }}_enunciado">{{ q.enunciado }}</textarea></div>
+            <div class="col-md-6"><label class="form-label">Elemento visual JSON</label><textarea class="form-control font-monospace" rows="4" name="q{{ q.numero }}_elemento_visual_json">{{ (q.elemento_visual or {})|tojson }}</textarea><div class="small-muted">Use tabela, grafico_barras, grafico_linha ou diagrama. Pode deixar como está.</div></div>
+            <div class="col-md-6"><label class="form-label">Dados de cálculo JSON</label><textarea class="form-control font-monospace" rows="4" name="q{{ q.numero }}_dados_calculo_json">{{ (q.dados_calculo or {})|tojson }}</textarea><div class="small-muted">Fórmula, valores e unidade usados pela questão.</div></div>
             {% for alt in ['A','B','C','D','E'] %}<div class="col-md-6"><label class="form-label">Alternativa {{ alt }}</label><textarea class="form-control" rows="2" name="q{{ q.numero }}_{{ alt }}">{{ q.alternativas[alt] }}</textarea></div>{% endfor %}
+            <div class="col-12"><label class="form-label">Resolução passo a passo</label><textarea class="form-control" rows="3" name="q{{ q.numero }}_resolucao">{% if q.resolucao %}{% for passo in q.resolucao %}{{ passo }}{% if not loop.last %}
+{% endif %}{% endfor %}{% endif %}</textarea></div>
             <div class="col-12"><label class="form-label">Explicação</label><textarea class="form-control" rows="2" name="q{{ q.numero }}_explicacao">{{ q.explicacao }}</textarea></div>
         </div>
     </div></div>

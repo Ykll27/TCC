@@ -166,6 +166,11 @@ def iniciar_banco():
                 correta TEXT NOT NULL,
                 habilidade TEXT,
                 explicacao TEXT,
+                visual_json TEXT,
+                calculo_json TEXT,
+                resolucao_json TEXT,
+                tipo_questao TEXT,
+                competencia TEXT,
                 origem TEXT DEFAULT 'ia',
                 hash TEXT UNIQUE,
                 aprovado INTEGER DEFAULT 1,
@@ -274,6 +279,11 @@ def iniciar_banco():
         _adicionar_coluna_se_nao_existir(conn, "avaliacoes", "status_revisao", "TEXT DEFAULT 'rascunho'")
         _adicionar_coluna_se_nao_existir(conn, "avaliacoes", "atualizado_em", "TEXT")
         _adicionar_coluna_se_nao_existir(conn, "questoes_cache", "habilidade", "TEXT")
+        _adicionar_coluna_se_nao_existir(conn, "questoes_cache", "visual_json", "TEXT")
+        _adicionar_coluna_se_nao_existir(conn, "questoes_cache", "calculo_json", "TEXT")
+        _adicionar_coluna_se_nao_existir(conn, "questoes_cache", "resolucao_json", "TEXT")
+        _adicionar_coluna_se_nao_existir(conn, "questoes_cache", "tipo_questao", "TEXT")
+        _adicionar_coluna_se_nao_existir(conn, "questoes_cache", "competencia", "TEXT")
 
         professor_padrao = _garantir_professor_padrao(conn)
         for tabela in ["alunos", "avaliacoes", "provas", "resultados", "questoes_cache", "tarefas_ia", "sessoes_scan"]:

@@ -36,6 +36,17 @@
                     <div class="col-md-4"><label class="form-label">Questões</label><input name="total_questoes_auto" type="number" class="form-control" value="10" min="1" max="90" required /></div>
                     <div class="col-12"><label class="form-label">Especificações</label><textarea name="especificacoes_auto" rows="3" class="form-control" placeholder="Nível, estilo, restrições, competências, observações..."></textarea></div>
                     <div class="col-12">
+                        <div class="border rounded-4 p-3 bg-light">
+                            <strong>Qualidade das questões</strong>
+                            <div class="row g-2 mt-2">
+                                <div class="col-md-4"><div class="form-check"><input class="form-check-input" type="checkbox" name="questoes_completas_auto" id="questoesCompletas" checked><label class="form-check-label" for="questoesCompletas">Questões completas</label></div></div>
+                                <div class="col-md-4"><div class="form-check"><input class="form-check-input" type="checkbox" name="usar_calculos_auto" id="usarCalculos" checked><label class="form-check-label" for="usarCalculos">Cálculos e fórmulas</label></div></div>
+                                <div class="col-md-4"><div class="form-check"><input class="form-check-input" type="checkbox" name="usar_visuais_auto" id="usarVisuais" checked><label class="form-check-label" for="usarVisuais">Tabelas, gráficos e imagens</label></div></div>
+                            </div>
+                            <div class="small-muted mt-2">O Atlas renderiza gráficos, tabelas e esquemas próprios na prova e no PDF, sem depender de imagens externas.</div>
+                        </div>
+                    </div>
+                    <div class="col-12">
                         <div class="form-check form-switch border rounded-4 p-3 ps-5 bg-light">
                             <input class="form-check-input" type="checkbox" name="permitir_ia_auto" id="permitirIA">
                             <label class="form-check-label" for="permitirIA"><strong>Permitir IA apenas se necessário</strong></label>

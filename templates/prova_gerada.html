@@ -16,6 +16,7 @@
 <div class="card atlas-card mb-3"><div class="card-body p-4">
     <div class="small-muted mb-2">Questão {{ "%02d"|format(q.numero|int) }} · {{ q.area }} · {{ q.tema }}</div>
     {% if q.contexto %}<p>{{ q.contexto }}</p>{% endif %}
+    {% include '_questao_visual.html' %}
     <p><strong>{{ q.enunciado }}</strong></p>
     <ol type="A" class="mb-0">{% for alt in ['A','B','C','D','E'] %}<li class="mb-2">{{ q.alternativas[alt] }}</li>{% endfor %}</ol>
 </div></div>

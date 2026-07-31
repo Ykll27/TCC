@@ -8,6 +8,6 @@
 <div class="card atlas-card"><div class="card-body p-4">
     <div class="row g-2 mb-4">{% for q, r in avaliacao.gabarito_professor.items() %}<div class="col-6 col-md-3 col-lg-2"><div class="metric text-center"><div class="small-muted">Questão {{ q }}</div><div class="value">{{ r }}</div></div></div>{% endfor %}</div>
     <h2 class="atlas-title h4">Explicações</h2>
-    <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Q</th><th>Resposta</th><th>Explicação</th></tr></thead><tbody>{% for q in avaliacao.questoes %}<tr><td>{{ q.numero }}</td><td><strong>{{ q.correta }}</strong></td><td>{{ q.explicacao }}</td></tr>{% endfor %}</tbody></table></div>
+    <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Q</th><th>Resposta</th><th>Tipo</th><th>Explicação e resolução</th></tr></thead><tbody>{% for q in avaliacao.questoes %}<tr><td>{{ q.numero }}</td><td><strong>{{ q.correta }}</strong></td><td><span class="badge text-bg-light">{{ q.tipo_questao or 'objetiva' }}</span></td><td><div>{{ q.explicacao }}</div>{% if q.resolucao %}<ol class="small-muted mt-2 mb-0">{% for passo in q.resolucao %}<li>{{ passo }}</li>{% endfor %}</ol>{% endif %}</td></tr>{% endfor %}</tbody></table></div>
 </div></div>
 {% endblock %}

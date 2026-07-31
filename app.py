@@ -360,16 +360,23 @@ def buscar_questoes_cache(materias: str, temas: str, total: int, professor_id=No
         questoes = []
         for i, row in enumerate(rows, start=1):
             alternativas = carregar_json_seguro(row["alternativas_json"], {})
+            colunas = set(row.keys())
             questoes.append(
                 {
                     "numero": i,
                     "area": row["materia"],
                     "tema": row["tema"] or "",
+                    "dificuldade": row["dificuldade"] or "medio",
+                    "tipo_questao": row["tipo_questao"] if "tipo_questao" in colunas else "",
                     "contexto": row["contexto"] or "",
+                    "elemento_visual": carregar_json_seguro(row["visual_json"], {}) if "visual_json" in colunas else {},
+                    "dados_calculo": carregar_json_seguro(row["calculo_json"], {}) if "calculo_json" in colunas else {},
                     "enunciado": row["enunciado"],
                     "alternativas": alternativas,
                     "correta": str(row["correta"] or "A").upper()[:1],
                     "habilidade": row["habilidade"] or "",
+                    "competencia": row["competencia"] if "competencia" in colunas else "",
+                    "resolucao": carregar_json_seguro(row["resolucao_json"], []) if "resolucao_json" in colunas else [],
                     "explicacao": row["explicacao"] or "",
                     "origem_cache_id": row["id"],
                 }
@@ -404,8 +411,9 @@ def salvar_questoes_no_cache(prova_gerada, professor_id=None):
                 """
                 INSERT OR IGNORE INTO questoes_cache
                     (professor_id, materia, tema, dificuldade, modelo, contexto, enunciado, alternativas_json, correta,
-                     habilidade, explicacao, origem, hash, aprovado, usado_vezes, criado_em, atualizado_em)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
+                     habilidade, explicacao, visual_json, calculo_json, resolucao_json, tipo_questao, competencia,
+                     origem, hash, aprovado, usado_vezes, criado_em, atualizado_em)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
                 """,
                 (
                     int(professor_id) if professor_id else None,
@@ -419,6 +427,11 @@ def salvar_questoes_no_cache(prova_gerada, professor_id=None):
                     str(q.get("correta") or "A").upper()[:1],
                     str(q.get("habilidade") or ""),
                     str(q.get("explicacao") or ""),
+                    json.dumps(q.get("elemento_visual") or {}, ensure_ascii=False),
+                    json.dumps(q.get("dados_calculo") or {}, ensure_ascii=False),
+                    json.dumps(q.get("resolucao") or [], ensure_ascii=False),
+                    str(q.get("tipo_questao") or ""),
+                    str(q.get("competencia") or ""),
                     modo or "ia",
                     h,
                     agora_str(),
@@ -1104,6 +1117,93 @@ def _texto_pdf(c, texto, x, y, largura, fonte="Helvetica", tamanho=10, entrelinh
     return y
 
 
+def _garantir_espaco_pdf(c, y, minimo=120):
+    from reportlab.lib.pagesizes import A4
+    _, altura_pagina = A4
+    if y < minimo:
+        c.showPage()
+        return altura_pagina - 50
+    return y
+
+
+def _desenhar_visual_pdf(c, visual, x, y, largura):
+    """Desenha tabelas, gráficos simples e esquemas no PDF da prova sem depender de imagem externa."""
+    if not isinstance(visual, dict) or not visual:
+        return y
+
+    y = _garantir_espaco_pdf(c, y, 135)
+    tipo = str(visual.get("tipo") or "diagrama").lower()
+    titulo = str(visual.get("titulo") or "Elemento visual")[:90]
+    fonte = str(visual.get("fonte") or "Elaboração própria/Atlas")[:80]
+
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(x, y, titulo)
+    y -= 12
+
+    if tipo == "tabela":
+        colunas = visual.get("colunas") if isinstance(visual.get("colunas"), list) else []
+        linhas = visual.get("linhas") if isinstance(visual.get("linhas"), list) else []
+        if colunas:
+            c.setFont("Helvetica-Bold", 8)
+            col_w = largura / max(len(colunas), 1)
+            for idx, col in enumerate(colunas):
+                c.rect(x + idx * col_w, y - 4, col_w, 14, stroke=1, fill=0)
+                c.drawString(x + idx * col_w + 3, y, str(col)[:22])
+            y -= 14
+        c.setFont("Helvetica", 8)
+        col_count = max(len(colunas), 1)
+        col_w = largura / col_count
+        for linha in linhas[:7]:
+            if not isinstance(linha, list):
+                linha = [linha]
+            y = _garantir_espaco_pdf(c, y, 80)
+            for idx in range(col_count):
+                valor = str(linha[idx] if idx < len(linha) else "")[:24]
+                c.rect(x + idx * col_w, y - 4, col_w, 13, stroke=1, fill=0)
+                c.drawString(x + idx * col_w + 3, y, valor)
+            y -= 13
+        y -= 5
+    elif tipo in ["grafico_barras", "grafico_linha"]:
+        dados = visual.get("dados") if isinstance(visual.get("dados"), list) else []
+        maxv = max([float(d.get("valor") or 0) for d in dados if isinstance(d, dict)] or [1])
+        c.setFont("Helvetica", 8)
+        for d in dados[:7]:
+            if not isinstance(d, dict):
+                continue
+            rotulo = str(d.get("rotulo") or "Item")[:18]
+            valor = float(d.get("valor") or 0)
+            bar_w = (valor / maxv) * (largura - 95) if maxv else 0
+            y = _garantir_espaco_pdf(c, y, 80)
+            c.drawString(x, y, rotulo)
+            c.rect(x + 70, y - 3, bar_w, 8, stroke=1, fill=0)
+            c.drawString(x + 75 + bar_w, y, str(round(valor, 2)))
+            y -= 13
+        y -= 4
+    else:
+        desc = str(visual.get("descricao") or "Figura esquemática gerada pelo Atlas.")
+        y = _texto_pdf(c, "Figura/diagrama: " + desc, x, y, largura, tamanho=8, entrelinha=11)
+        itens = visual.get("itens") if isinstance(visual.get("itens"), list) else []
+        if itens:
+            y = _texto_pdf(c, "Fluxo: " + " → ".join(str(i) for i in itens[:6]), x + 8, y, largura - 8, tamanho=8, entrelinha=11)
+
+    c.setFont("Helvetica-Oblique", 7)
+    c.drawString(x, y, f"Fonte: {fonte}")
+    return y - 12
+
+
+def _texto_calculo_pdf(q):
+    calc = q.get("dados_calculo") if isinstance(q.get("dados_calculo"), dict) else {}
+    if not calc:
+        return ""
+    partes = []
+    if calc.get("formula"):
+        partes.append(f"Fórmula/dado de apoio: {calc.get('formula')}")
+    valores = calc.get("valores") if isinstance(calc.get("valores"), dict) else {}
+    if valores:
+        partes.append("Valores: " + "; ".join(f"{k}={v}" for k, v in list(valores.items())[:6]))
+    return " | ".join(partes)
+
+
 def gerar_pdf_prova(avaliacao, incluir_gabarito=False):
     """Gera PDF pronto para impressão da prova ou do gabarito do professor."""
     from reportlab.lib.pagesizes import A4
@@ -1155,9 +1255,13 @@ def gerar_pdf_prova(avaliacao, incluir_gabarito=False):
         c.drawString(margem, y, "Explicações resumidas")
         y -= 18
         for q in dados["questoes"]:
+            texto_explicacao = f"{str(q.get('numero')).zfill(2)}. {q.get('explicacao', '')}"
+            resolucao = q.get("resolucao") if isinstance(q.get("resolucao"), list) else []
+            if resolucao:
+                texto_explicacao += " Resolução: " + " | ".join(str(p) for p in resolucao[:5])
             y = _texto_pdf(
                 c,
-                f"{str(q.get('numero')).zfill(2)}. {q.get('explicacao', '')}",
+                texto_explicacao,
                 margem,
                 y,
                 largura_texto,
@@ -1176,6 +1280,11 @@ def gerar_pdf_prova(avaliacao, incluir_gabarito=False):
             y -= 14
             y = _texto_pdf(c, q.get("contexto", ""), margem, y, largura_texto, tamanho=9, entrelinha=12)
             y -= 3
+            y = _desenhar_visual_pdf(c, q.get("elemento_visual"), margem, y, largura_texto)
+            apoio_calculo = _texto_calculo_pdf(q)
+            if apoio_calculo:
+                y = _texto_pdf(c, apoio_calculo, margem, y, largura_texto, fonte="Helvetica-Oblique", tamanho=8, entrelinha=11)
+                y -= 2
             y = _texto_pdf(c, q.get("enunciado", ""), margem, y, largura_texto, fonte="Helvetica-Bold", tamanho=10, entrelinha=13)
             y -= 4
 
@@ -1313,6 +1422,15 @@ def gerar_prova_automatica():
     materias = request.form.get("materias_auto", "Conhecimentos gerais")
     temas = request.form.get("temas_auto", "")
     especificacoes = request.form.get("especificacoes_auto", "")
+    preferencias_qualidade = []
+    if request.form.get("questoes_completas_auto") == "on":
+        preferencias_qualidade.append("Gerar questões mais completas, contextualizadas e menos rasas.")
+    if request.form.get("usar_calculos_auto") == "on":
+        preferencias_qualidade.append("Incluir cálculos, fórmulas, dados numéricos e resolução passo a passo quando fizer sentido.")
+    if request.form.get("usar_visuais_auto") == "on":
+        preferencias_qualidade.append("Incluir elementos visuais renderizáveis pelo Atlas, como tabelas, gráficos, esquemas e diagramas próprios, sem links externos.")
+    if preferencias_qualidade:
+        especificacoes = (especificacoes + "\n" if especificacoes else "") + "Preferências de qualidade: " + " ".join(preferencias_qualidade)
     # Modo interno fixo: o professor não escolhe mais o modo.
     # O sistema decide automaticamente entre cache, IA e fallback para manter rapidez e estabilidade.
     modo_geracao = "inteligente"
@@ -2091,15 +2209,34 @@ def editar_avaliacao(avaliacao_id):
             correta = request.form.get(f"q{i}_correta", "A").strip().upper()[:1]
             if correta not in ["A", "B", "C", "D", "E"]:
                 correta = "A"
+            antigo = dados["questoes"][i - 1] if i - 1 < len(dados.get("questoes", [])) else {}
+            visual_txt = request.form.get(f"q{i}_elemento_visual_json", "").strip()
+            calculo_txt = request.form.get(f"q{i}_dados_calculo_json", "").strip()
+            try:
+                elemento_visual = json.loads(visual_txt) if visual_txt else (antigo.get("elemento_visual") or {})
+            except Exception:
+                elemento_visual = antigo.get("elemento_visual") or {}
+            try:
+                dados_calculo = json.loads(calculo_txt) if calculo_txt else (antigo.get("dados_calculo") or {})
+            except Exception:
+                dados_calculo = antigo.get("dados_calculo") or {}
+            resolucao_txt = request.form.get(f"q{i}_resolucao", "").strip()
+            resolucao = [p.strip() for p in resolucao_txt.split("\n") if p.strip()] if resolucao_txt else (antigo.get("resolucao") or [])
             questoes.append({
                 "numero": i,
                 "area": request.form.get(f"q{i}_area", "").strip(),
                 "tema": request.form.get(f"q{i}_tema", "").strip(),
+                "dificuldade": request.form.get(f"q{i}_dificuldade", antigo.get("dificuldade", "medio")).strip() or "medio",
+                "tipo_questao": request.form.get(f"q{i}_tipo_questao", antigo.get("tipo_questao", "")).strip(),
                 "habilidade": request.form.get(f"q{i}_habilidade", "").strip(),
+                "competencia": request.form.get(f"q{i}_competencia", antigo.get("competencia", "")).strip(),
                 "contexto": request.form.get(f"q{i}_contexto", "").strip(),
+                "elemento_visual": elemento_visual,
+                "dados_calculo": dados_calculo,
                 "enunciado": request.form.get(f"q{i}_enunciado", "").strip(),
                 "alternativas": alts,
                 "correta": correta,
+                "resolucao": resolucao,
                 "explicacao": request.form.get(f"q{i}_explicacao", "").strip(),
             })
             gabarito[str(i)] = correta
@@ -2293,6 +2430,12 @@ def diagnosticar_avaliacao(dados):
             diagnosticos.append({"questao": numero, "tipo": "Gabarito inválido", "mensagem": "A alternativa correta precisa ser A, B, C, D ou E."})
         if not str(q.get("explicacao", "")).strip():
             diagnosticos.append({"questao": numero, "tipo": "Sem explicação", "mensagem": "Adicionar explicação ajuda na devolutiva e relatório."})
+        if not isinstance(q.get("elemento_visual"), dict) or not q.get("elemento_visual"):
+            diagnosticos.append({"questao": numero, "tipo": "Sem elemento visual", "mensagem": "Questões mais completas podem usar tabela, gráfico, esquema ou diagrama."})
+        if not isinstance(q.get("resolucao"), list) or not q.get("resolucao"):
+            diagnosticos.append({"questao": numero, "tipo": "Sem resolução", "mensagem": "O gabarito do professor fica melhor com resolução passo a passo."})
+        if not isinstance(q.get("dados_calculo"), dict) or not q.get("dados_calculo"):
+            diagnosticos.append({"questao": numero, "tipo": "Sem dados de cálculo", "mensagem": "Quando fizer sentido, adicione fórmula, valores e unidade para questão calculável."})
     return diagnosticos
 
 
@@ -2308,11 +2451,26 @@ def melhorar_avaliacao(avaliacao_id):
         gabarito = {}
         for q in dados["questoes"]:
             item = dict(q)
+            numero = int(item.get("numero") or len(questoes) + 1)
+            fallback_rico = _criar_questao_fallback(numero, dados.get("titulo", "Avaliação"), dados.get("materias", "Conhecimentos gerais"), dados.get("temas", ""))
             item["enunciado"] = re.sub(r"\s+", " ", str(item.get("enunciado", "")).strip())
             item["contexto"] = re.sub(r"\s+", " ", str(item.get("contexto", "")).strip())
-            item["explicacao"] = str(item.get("explicacao") or f"A alternativa {item.get('correta', 'A')} é a resposta indicada no gabarito oficial.").strip()
+            if len(item["contexto"]) < 35:
+                item["contexto"] = fallback_rico.get("contexto", item["contexto"])
+            if len(item["enunciado"]) < 25:
+                item["enunciado"] = fallback_rico.get("enunciado", item["enunciado"])
+            if not isinstance(item.get("elemento_visual"), dict) or not item.get("elemento_visual"):
+                item["elemento_visual"] = fallback_rico.get("elemento_visual", {})
+            if not isinstance(item.get("dados_calculo"), dict) or not item.get("dados_calculo"):
+                item["dados_calculo"] = fallback_rico.get("dados_calculo", {})
+            if not isinstance(item.get("resolucao"), list) or not item.get("resolucao"):
+                item["resolucao"] = fallback_rico.get("resolucao", [])
+            item["tipo_questao"] = item.get("tipo_questao") or fallback_rico.get("tipo_questao", "mista")
+            item["dificuldade"] = item.get("dificuldade") or fallback_rico.get("dificuldade", "medio")
+            item["competencia"] = item.get("competencia") or fallback_rico.get("competencia", "")
+            item["explicacao"] = str(item.get("explicacao") or fallback_rico.get("explicacao") or f"A alternativa {item.get('correta', 'A')} é a resposta indicada no gabarito oficial.").strip()
             alts = item.get("alternativas", {}) if isinstance(item.get("alternativas"), dict) else {}
-            item["alternativas"] = {a: re.sub(r"\s+", " ", str(alts.get(a, "")).strip()) for a in ["A", "B", "C", "D", "E"]}
+            item["alternativas"] = {a: re.sub(r"\s+", " ", str(alts.get(a, "")).strip()) or fallback_rico.get("alternativas", {}).get(a, "") for a in ["A", "B", "C", "D", "E"]}
             correta = str(item.get("correta", "A")).upper()[:1]
             if correta not in ["A", "B", "C", "D", "E"]:
                 correta = "A"
@@ -2332,7 +2490,7 @@ def melhorar_avaliacao(avaliacao_id):
             conn.commit()
         finally:
             conn.close()
-        flash("Melhorias aplicadas: textos normalizados, explicações básicas preenchidas e gabarito validado.", "success")
+        flash("Melhorias aplicadas: textos normalizados, questões enriquecidas com visual/cálculo quando faltava, resoluções preenchidas e gabarito validado.", "success")
         return redirect(url_for("ver_avaliacao", avaliacao_id=avaliacao_id))
     diagnosticos = diagnosticar_avaliacao(dados)
     return render_template("melhorar_avaliacao.html", avaliacao=dados, diagnosticos=diagnosticos)
