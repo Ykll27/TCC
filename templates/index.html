@@ -36,17 +36,6 @@
                     <div class="col-md-4"><label class="form-label">Questões</label><input name="total_questoes_auto" type="number" class="form-control" value="10" min="1" max="90" required /></div>
                     <div class="col-12"><label class="form-label">Especificações</label><textarea name="especificacoes_auto" rows="3" class="form-control" placeholder="Nível, estilo, restrições, competências, observações..."></textarea></div>
                     <div class="col-12">
-                        <div class="border rounded-4 p-3 bg-light">
-                            <strong>Qualidade das questões</strong>
-                            <div class="row g-2 mt-2">
-                                <div class="col-md-4"><div class="form-check"><input class="form-check-input" type="checkbox" name="questoes_completas_auto" id="questoesCompletas" checked><label class="form-check-label" for="questoesCompletas">Questões completas</label></div></div>
-                                <div class="col-md-4"><div class="form-check"><input class="form-check-input" type="checkbox" name="usar_calculos_auto" id="usarCalculos" checked><label class="form-check-label" for="usarCalculos">Cálculos e fórmulas</label></div></div>
-                                <div class="col-md-4"><div class="form-check"><input class="form-check-input" type="checkbox" name="usar_visuais_auto" id="usarVisuais" checked><label class="form-check-label" for="usarVisuais">Tabelas, gráficos e imagens</label></div></div>
-                            </div>
-                            <div class="small-muted mt-2">O Atlas renderiza gráficos, tabelas e esquemas próprios na prova e no PDF, sem depender de imagens externas.</div>
-                        </div>
-                    </div>
-                    <div class="col-12">
                         <div class="form-check form-switch border rounded-4 p-3 ps-5 bg-light">
                             <input class="form-check-input" type="checkbox" name="permitir_ia_auto" id="permitirIA">
                             <label class="form-check-label" for="permitirIA"><strong>Permitir IA apenas se necessário</strong></label>
@@ -116,7 +105,7 @@
                     </select>
                     <input class="form-control" type="file" name="folhas" accept="image/*,.pdf" multiple required />
                     <button class="btn btn-success" type="submit">Corrigir arquivos</button>
-                    <div class="small-muted">O QR da folha é obrigatório para salvar automaticamente. Se falhar, a imagem vai para Identificação Assistida.</div>
+                    <div class="small-muted">O QR da folha é obrigatório para salvar automaticamente. Se falhar, o Atlas não salva no aluno errado.</div>
                 </form>
                 {% else %}<p class="small-muted mb-0">Gere folhas de resposta antes de corrigir.</p>{% endif %}
             </div>
@@ -137,7 +126,6 @@
                     <td class="d-flex flex-wrap gap-1">
                         <a class="btn btn-sm btn-outline-primary" href="{{ url_for('ver_avaliacao', avaliacao_id=avaliacao.id) }}">Abrir</a>
                         <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('editar_avaliacao', avaliacao_id=avaliacao.id) }}">Revisar</a>
-                        <a class="btn btn-sm btn-outline-warning" href="{{ url_for('melhorar_avaliacao', avaliacao_id=avaliacao.id) }}">Melhorar</a>
                         <a class="btn btn-sm btn-outline-dark" href="{{ url_for('ver_gabarito_avaliacao', avaliacao_id=avaliacao.id) }}">Gabarito</a>
                         <a class="btn btn-sm btn-outline-success" href="{{ url_for('selecionar_alunos_avaliacao', avaliacao_id=avaliacao.id) }}">Folhas</a>
                         <a class="btn btn-sm btn-outline-info" href="{{ url_for('relatorio_avaliacao', avaliacao_id=avaliacao.id) }}">Relatório</a>
@@ -159,7 +147,7 @@
                 <tbody>
                 {% for r in resultados %}
                 <tr>
-                    <td>{{ r.aluno_nome or 'Aluno não identificado' }}</td><td>{{ r.prova_titulo }}</td><td><strong>{{ r.nota_percentual }}%</strong></td><td><span class="badge {% if r.status_confianca == 'revisao' %}text-bg-warning{% else %}text-bg-success{% endif %}">{{ r.status_confianca or 'confiavel' }}</span></td><td>{{ r.criado_em }}</td><td class="d-flex flex-wrap gap-1"><a class="btn btn-sm btn-outline-primary" href="{{ url_for('ver_resultado_detalhado', resultado_id=r.id) }}">Detalhes</a><a class="btn btn-sm btn-outline-warning" href="{{ url_for('revisar_resultado', resultado_id=r.id) }}">Revisar</a></td>
+                    <td>{{ r.aluno_nome or 'Aluno não identificado' }}</td><td>{{ r.prova_titulo }}</td><td><strong>{{ r.nota_percentual }}%</strong></td><td><span class="badge {% if r.status_confianca == 'revisao' %}text-bg-warning{% else %}text-bg-success{% endif %}">{{ r.status_confianca or 'confiavel' }}</span></td><td>{{ r.criado_em }}</td><td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('ver_resultado_detalhado', resultado_id=r.id) }}">Detalhes</a></td>
                 </tr>
                 {% else %}<tr><td colspan="6" class="text-muted">Nenhum resultado ainda.</td></tr>{% endfor %}
                 </tbody>

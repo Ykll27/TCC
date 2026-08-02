@@ -23,7 +23,7 @@
                     {% if g.professor %}
                     <li class="nav-item"><a class="nav-link" href="{{ url_for('home') }}">Painel</a></li>
                     <li class="nav-item"><a class="nav-link" href="{{ url_for('scan_tempo_real') }}">Scan</a></li>
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('identificacoes_pendentes') }}">QR pendente</a></li>
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('identificacoes_pendentes') }}">Identificação Manual</a></li>
                     <li class="nav-item"><span class="nav-link small">{{ g.professor.nome }}</span></li>
                     <li class="nav-item"><a class="btn btn-sm btn-outline-light" href="{{ url_for('logout') }}">Sair</a></li>
                     {% endif %}

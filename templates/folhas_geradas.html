@@ -6,7 +6,6 @@
     <div class="d-flex flex-wrap gap-2"><button class="btn btn-outline-secondary" onclick="window.print()">Imprimir lista</button><a class="btn btn-atlas" href="{{ url_for('scan_tempo_real') }}">Ir para Scan</a><a class="btn btn-outline-dark" href="{{ url_for('home') }}">Painel</a></div>
 </div>
 <div class="card atlas-card"><div class="card-body p-4">
-    <div class="alert alert-info">Se você ativou embaralhamento, imprima também a <strong>prova personalizada</strong> de cada aluno, porque a ordem das questões pode mudar.</div>
-    <div class="table-responsive"><table class="table table-hover align-middle"><thead><tr><th>ID</th><th>Aluno</th><th>Turma</th><th>Matrícula</th><th>Ações</th></tr></thead><tbody>{% for folha in folhas %}<tr><td>#{{ folha.id }}</td><td>{{ folha.aluno_nome }}</td><td>{{ folha.turma }}</td><td>{{ folha.matricula }}</td><td class="d-flex flex-wrap gap-2"><a class="btn btn-sm btn-outline-primary" target="_blank" href="{{ url_for('folha', prova_id=folha.id) }}">Folha</a><a class="btn btn-sm btn-outline-dark" target="_blank" href="{{ url_for('imprimir_prova_personalizada', prova_id=folha.id) }}">Prova personalizada</a></td></tr>{% endfor %}</tbody></table></div>
+    <div class="table-responsive"><table class="table table-hover align-middle"><thead><tr><th>ID</th><th>Aluno</th><th>Turma</th><th>Matrícula</th><th></th></tr></thead><tbody>{% for folha in folhas %}<tr><td>#{{ folha.id }}</td><td>{{ folha.aluno_nome }}</td><td>{{ folha.turma }}</td><td>{{ folha.matricula }}</td><td><a class="btn btn-sm btn-outline-primary" target="_blank" href="{{ url_for('folha', prova_id=folha.id) }}">Abrir/Imprimir</a></td></tr>{% endfor %}</tbody></table></div>
 </div></div>
 {% endblock %}

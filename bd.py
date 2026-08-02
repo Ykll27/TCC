@@ -166,11 +166,6 @@ def iniciar_banco():
                 correta TEXT NOT NULL,
                 habilidade TEXT,
                 explicacao TEXT,
-                visual_json TEXT,
-                calculo_json TEXT,
-                resolucao_json TEXT,
-                tipo_questao TEXT,
-                competencia TEXT,
                 origem TEXT DEFAULT 'ia',
                 hash TEXT UNIQUE,
                 aprovado INTEGER DEFAULT 1,
@@ -246,47 +241,32 @@ def iniciar_banco():
             CREATE TABLE IF NOT EXISTS identificacoes_pendentes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 professor_id INTEGER NOT NULL,
-                sessao_id INTEGER,
-                prova_base_id INTEGER,
-                imagem_arquivo TEXT NOT NULL,
-                origem TEXT NOT NULL DEFAULT 'scan',
-                status TEXT NOT NULL DEFAULT 'pendente',
+                caminho_arquivo TEXT NOT NULL,
+                origem TEXT DEFAULT 'upload',
                 mensagem TEXT,
-                dados_qr_json TEXT,
-                sugestoes_json TEXT,
+                resolvido INTEGER DEFAULT 0,
                 resultado_id INTEGER,
                 criado_em TEXT NOT NULL,
                 resolvido_em TEXT,
                 FOREIGN KEY (professor_id) REFERENCES professores(id),
-                FOREIGN KEY (sessao_id) REFERENCES sessoes_scan(id),
-                FOREIGN KEY (prova_base_id) REFERENCES provas(id),
                 FOREIGN KEY (resultado_id) REFERENCES resultados(id)
             )
             """
         )
 
         # Migrações seguras para bancos antigos.
-        for tabela in ["alunos", "avaliacoes", "provas", "resultados", "questoes_cache", "tarefas_ia", "sessoes_scan"]:
+        for tabela in ["alunos", "avaliacoes", "provas", "resultados", "questoes_cache", "tarefas_ia", "sessoes_scan", "identificacoes_pendentes"]:
             _adicionar_coluna_se_nao_existir(conn, tabela, "professor_id", "INTEGER")
         _adicionar_coluna_se_nao_existir(conn, "provas", "avaliacao_id", "INTEGER")
         _adicionar_coluna_se_nao_existir(conn, "provas", "qr_arquivo", "TEXT")
-        _adicionar_coluna_se_nao_existir(conn, "provas", "ordem_questoes_json", "TEXT")
-        _adicionar_coluna_se_nao_existir(conn, "provas", "mapa_questoes_json", "TEXT")
         _adicionar_coluna_se_nao_existir(conn, "resultados", "aluno_id", "INTEGER")
         _adicionar_coluna_se_nao_existir(conn, "resultados", "status_confianca", "TEXT DEFAULT 'confiavel'")
-        _adicionar_coluna_se_nao_existir(conn, "resultados", "revisado_em", "TEXT")
-        _adicionar_coluna_se_nao_existir(conn, "resultados", "observacao_revisao", "TEXT")
         _adicionar_coluna_se_nao_existir(conn, "avaliacoes", "status_revisao", "TEXT DEFAULT 'rascunho'")
         _adicionar_coluna_se_nao_existir(conn, "avaliacoes", "atualizado_em", "TEXT")
         _adicionar_coluna_se_nao_existir(conn, "questoes_cache", "habilidade", "TEXT")
-        _adicionar_coluna_se_nao_existir(conn, "questoes_cache", "visual_json", "TEXT")
-        _adicionar_coluna_se_nao_existir(conn, "questoes_cache", "calculo_json", "TEXT")
-        _adicionar_coluna_se_nao_existir(conn, "questoes_cache", "resolucao_json", "TEXT")
-        _adicionar_coluna_se_nao_existir(conn, "questoes_cache", "tipo_questao", "TEXT")
-        _adicionar_coluna_se_nao_existir(conn, "questoes_cache", "competencia", "TEXT")
 
         professor_padrao = _garantir_professor_padrao(conn)
-        for tabela in ["alunos", "avaliacoes", "provas", "resultados", "questoes_cache", "tarefas_ia", "sessoes_scan"]:
+        for tabela in ["alunos", "avaliacoes", "provas", "resultados", "questoes_cache", "tarefas_ia", "sessoes_scan", "identificacoes_pendentes"]:
             if _tabela_existe(conn, tabela) and "professor_id" in _colunas_tabela(conn, tabela):
                 conn.execute(f"UPDATE {tabela} SET professor_id = ? WHERE professor_id IS NULL", (professor_padrao,))
 
@@ -296,9 +276,9 @@ def iniciar_banco():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_resultados_prof ON resultados (professor_id, prova_id, criado_em)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_questoes_cache_busca ON questoes_cache (professor_id, materia, tema, modelo, aprovado)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_tarefas_ia_status ON tarefas_ia (status, criado_em)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_identificacoes_pendentes ON identificacoes_pendentes (professor_id, resolvido, criado_em)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sessoes_scan_status ON sessoes_scan (professor_id, status, criado_em)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_leituras_scan_sessao ON leituras_scan (sessao_id, aluno_id, prova_id)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_identificacoes_pendentes_prof ON identificacoes_pendentes (professor_id, status, criado_em)")
 
         alunos = [
             ("Ana Clara Souza", "MAT001", "3º Ano A"),

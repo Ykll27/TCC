@@ -56,45 +56,203 @@ def normalizar_gabarito_oficial(gabarito: Dict[str, str]) -> Dict[str, str]:
     return dict(sorted(normalizado.items(), key=lambda item: int(item[0])))
 
 
-def ler_qrcode(caminho_imagem: str) -> Optional[Dict[str, Any]]:
-    """Lê QR Code com tentativas leves para câmera/celular.
-
-    Tenta imagem original, redimensionada e variações de contraste antes de desistir.
-    Isso melhora casos de foto distante, borrada ou com pouca luz sem usar IA.
+def _normalizar_payload_qr(payload: str) -> Optional[Dict[str, Any]]:
     """
-    imagem = ler_imagem(caminho_imagem)
-    if imagem is None:
+    Normaliza QR antigo e QR compacto.
+    Nunca devolve chaves importantes como None.
+
+    Formatos aceitos:
+    - Antigo: {"aluno_id": 70, "prova_id": 1, ...}
+    - Novo compacto: {"v": 3, "s": "atlas", "a": 70, "p": 1, "m": "234567", ...}
+    """
+    if not payload:
         return None
 
-    detector = cv2.QRCodeDetector()
-    tentativas = []
-    tentativas.append(imagem)
+    try:
+        dados = json.loads(str(payload).strip())
+    except Exception:
+        return {"conteudo_qr": str(payload or "")}
 
+    if not isinstance(dados, dict):
+        return {"conteudo_qr": str(payload or "")}
+
+    normalizado = dict(dados)
+
+    # Compatibilidade com QR compacto.
+    aliases = {
+        "a": "aluno_id",
+        "aid": "aluno_id",
+        "aluno": "aluno_id",
+        "p": "prova_id",
+        "pid": "prova_id",
+        "prova": "prova_id",
+        "m": "matricula",
+        "mat": "matricula",
+        "t": "turma",
+        "sig": "assinatura",
+    }
+    for curto, completo in aliases.items():
+        if completo not in normalizado and curto in normalizado:
+            normalizado[completo] = normalizado.get(curto)
+
+    # Garante strings/inteiros limpos onde importa.
+    for chave in ["aluno_id", "prova_id", "matricula", "nome", "turma", "titulo", "disciplina", "assinatura"]:
+        if normalizado.get(chave) is None:
+            normalizado[chave] = ""
+
+    try:
+        if normalizado.get("aluno_id") != "":
+            normalizado["aluno_id"] = int(normalizado["aluno_id"])
+    except Exception:
+        normalizado["aluno_id"] = ""
+
+    try:
+        if normalizado.get("prova_id") != "":
+            normalizado["prova_id"] = int(normalizado["prova_id"])
+    except Exception:
+        normalizado["prova_id"] = ""
+
+    return normalizado
+
+
+def _regioes_provaveis_qr(imagem: np.ndarray) -> List[Tuple[str, np.ndarray]]:
+    """Recortes prováveis do QR. No Atlas ele fica no cabeçalho superior direito."""
     h, w = imagem.shape[:2]
-    maior = max(h, w)
-    if maior < 1200:
-        escala = 1200 / maior
-        tentativas.append(cv2.resize(imagem, (int(w * escala), int(h * escala)), interpolation=cv2.INTER_CUBIC))
-    elif maior > 1800:
-        escala = 1800 / maior
-        tentativas.append(cv2.resize(imagem, (int(w * escala), int(h * escala)), interpolation=cv2.INTER_AREA))
+    regioes = [
+        # Os crops vêm primeiro porque são muito mais rápidos e evitam o QR ficar pequeno demais.
+        ("cabecalho_qr", imagem[int(h * 0.04):int(h * 0.36), int(w * 0.50):int(w * 0.98)]),
+        ("topo_direito", imagem[0:int(h * 0.45), int(w * 0.42):w]),
+        ("topo", imagem[0:int(h * 0.45), 0:w]),
+        ("inteira", imagem),
+    ]
+    return [(nome, crop) for nome, crop in regioes if crop is not None and crop.size > 0]
 
-    gray = cv2.cvtColor(imagem, cv2.COLOR_BGR2GRAY)
-    equalizada = cv2.equalizeHist(gray)
-    tentativas.append(cv2.cvtColor(equalizada, cv2.COLOR_GRAY2BGR))
 
-    for img in tentativas:
+def _rotacionar_imagem(imagem: np.ndarray, angulo: float) -> np.ndarray:
+    h, w = imagem.shape[:2]
+    matriz = cv2.getRotationMatrix2D((w / 2, h / 2), angulo, 1.0)
+    borda = 255 if len(imagem.shape) == 2 else (255, 255, 255)
+    return cv2.warpAffine(
+        imagem,
+        matriz,
+        (w, h),
+        flags=cv2.INTER_CUBIC,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=borda,
+    )
+
+
+def _variantes_qr(imagem: np.ndarray) -> List[Tuple[str, np.ndarray]]:
+    """Variações de pré-processamento para QR com sombra, ruído ou baixo contraste."""
+    if len(imagem.shape) == 2:
+        gray = imagem
+        bgr = cv2.cvtColor(imagem, cv2.COLOR_GRAY2BGR)
+    else:
+        bgr = imagem
+        gray = cv2.cvtColor(imagem, cv2.COLOR_BGR2GRAY)
+
+    variantes: List[Tuple[str, np.ndarray]] = [("original", bgr), ("gray", gray)]
+
+    try:
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8)).apply(gray)
+        variantes.append(("clahe", clahe))
+    except Exception:
+        clahe = gray
+
+    variantes.append(("equalizada", cv2.equalizeHist(gray)))
+
+    blur = cv2.GaussianBlur(clahe, (3, 3), 0)
+    for bloco in [21, 31, 41]:
         try:
-            dados, _, _ = detector.detectAndDecode(img)
+            adaptive = cv2.adaptiveThreshold(
+                blur,
+                255,
+                cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY,
+                bloco,
+                5,
+            )
+            variantes.append((f"adaptive_{bloco}", adaptive))
         except Exception:
-            dados = ""
+            pass
+
+    return variantes
+
+
+def _decodificar_qr_opencv(imagem: np.ndarray) -> str:
+    detector = cv2.QRCodeDetector()
+
+    try:
+        dados, _, _ = detector.detectAndDecode(imagem)
         if dados:
-            try:
-                return json.loads(dados)
-            except json.JSONDecodeError:
-                return {"conteudo_qr": dados}
+            return str(dados)
+    except Exception:
+        pass
+
+    try:
+        ok, lista, _, _ = detector.detectAndDecodeMulti(imagem)
+        if ok and lista:
+            for item in lista:
+                if item:
+                    return str(item)
+    except Exception:
+        pass
+
+    return ""
+
+
+def ler_qrcode(caminho_imagem: str) -> Optional[Dict[str, Any]]:
+    """
+    Leitor resiliente de QR Code.
+
+    Pipeline:
+    1. leitura direta;
+    2. recortes do cabeçalho/topo direito;
+    3. aumento de escala;
+    4. CLAHE/equalização;
+    5. threshold adaptativo;
+    6. rotações pequenas.
+
+    Se falhar, retorna None. O app.py deve tratar None como pendência manual,
+    nunca como autorização para salvar em aluno/prova base.
+    """
+    imagem = ler_imagem(caminho_imagem)
+    if imagem is None or imagem.size == 0:
+        return None
+
+    # Tentativa direta, mais rápida.
+    payload = _decodificar_qr_opencv(imagem)
+    if payload:
+        return _normalizar_payload_qr(payload)
+
+    escalas_padrao = [1.0, 1.5, 2.0, 3.0]
+    angulos_padrao = [0, -3, 3, -6, 6, -10, 10]
+
+    for nome_regiao, regiao in _regioes_provaveis_qr(imagem):
+        for escala in escalas_padrao:
+            # Não aumenta a imagem inteira: fica lento demais no Scan.
+            if nome_regiao == "inteira" and escala != 1.0:
+                continue
+
+            # Evita explosão de processamento em crops muito grandes.
+            if regiao.shape[0] * regiao.shape[1] > 1_800_000 and escala > 1.5:
+                continue
+
+            if escala == 1.0:
+                redimensionada = regiao
+            else:
+                redimensionada = cv2.resize(regiao, None, fx=escala, fy=escala, interpolation=cv2.INTER_CUBIC)
+
+            angulos = [0] if nome_regiao in ["inteira", "topo"] else angulos_padrao
+            for angulo in angulos:
+                ajustada = _rotacionar_imagem(redimensionada, angulo) if angulo else redimensionada
+                for _, variante in _variantes_qr(ajustada):
+                    payload = _decodificar_qr_opencv(variante)
+                    if payload:
+                        return _normalizar_payload_qr(payload)
 
     return None
+
 
 def preparar_imagem(caminho_imagem: str):
     imagem = ler_imagem(caminho_imagem)
@@ -360,6 +518,227 @@ def _pontuacao_preenchimento(thresh: np.ndarray, bolha: Dict[str, Any]) -> float
     return float(np.count_nonzero(pixels > 0) / pixels.size)
 
 
+def _pontuacao_circulo(gray: np.ndarray, circulo: Dict[str, Any]) -> float:
+    """
+    Pontuação baseada no interior real do círculo detectado por Hough.
+    Ajuda em folhas antigas onde as letras A/B/C/D/E estavam dentro das bolhas.
+    """
+    x, y, r = int(circulo["cx"]), int(circulo["cy"]), int(circulo["r"])
+    r = max(4, r)
+
+    y1, y2 = max(0, y - r), min(gray.shape[0], y + r + 1)
+    x1, x2 = max(0, x - r), min(gray.shape[1], x + r + 1)
+    recorte = gray[y1:y2, x1:x2]
+    if recorte.size == 0:
+        return 0.0
+
+    blur = cv2.GaussianBlur(recorte, (3, 3), 0)
+    th = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
+
+    h, w = th.shape[:2]
+    yy, xx = np.ogrid[:h, :w]
+    cx = w / 2
+    cy = h / 2
+
+    # Usa o interior do círculo. Em folha nova as bolhas ficam vazias; em folha antiga
+    # pode haver letra no centro, mas uma bolha preenchida ainda fica muito mais escura.
+    raio_interno = min(w, h) * 0.33
+    mascara = (xx - cx) ** 2 + (yy - cy) ** 2 <= raio_interno ** 2
+    if not np.any(mascara):
+        return 0.0
+
+    return float(np.count_nonzero(th[mascara] > 0) / np.count_nonzero(mascara))
+
+
+def _mesclar_circulos(circulos: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Remove círculos duplicados vindos do HoughCircles."""
+    saida: List[Dict[str, Any]] = []
+    for c in sorted(circulos, key=lambda item: (item["cy"], item["cx"], -item["r"])):
+        duplicado = False
+        for s in saida:
+            dist = ((c["cx"] - s["cx"]) ** 2 + (c["cy"] - s["cy"]) ** 2) ** 0.5
+            if dist < max(8, min(c["r"], s["r"]) * 0.75):
+                # Mantém o círculo maior/mais estável.
+                if c["r"] > s["r"]:
+                    s.update(c)
+                duplicado = True
+                break
+        if not duplicado:
+            saida.append(c)
+    return saida
+
+
+def _detectar_circulos_hough(gray: np.ndarray) -> List[Dict[str, Any]]:
+    """Detecta círculos de alternativas por HoughCircles."""
+    altura, largura = gray.shape[:2]
+    min_dim = min(altura, largura)
+    min_r = max(6, int(min_dim * 0.006))
+    max_r = max(12, int(min_dim * 0.026))
+
+    blur = cv2.medianBlur(gray, 5)
+    encontrados: List[Dict[str, Any]] = []
+
+    # Mais sensível primeiro, depois mais rígido.
+    for param2 in [40, 35, 30, 25, 22]:
+        circles = cv2.HoughCircles(
+            blur,
+            cv2.HOUGH_GRADIENT,
+            dp=1.2,
+            minDist=max(18, int(min_dim * 0.018)),
+            param1=100,
+            param2=param2,
+            minRadius=min_r,
+            maxRadius=max_r,
+        )
+        if circles is None:
+            continue
+        for x, y, r in np.round(circles[0, :]).astype(int):
+            # Ignora topo muito alto e rodapé. As respostas ficam abaixo do cabeçalho.
+            if y < altura * 0.16 or y > altura * 0.92:
+                continue
+            # Evita a área do QR no topo direito.
+            if y < altura * 0.32 and x > largura * 0.55:
+                continue
+            encontrados.append({"cx": float(x), "cy": float(y), "r": float(r), "x": int(x-r), "y": int(y-r), "w": int(2*r), "h": int(2*r)})
+
+        encontrados = _mesclar_circulos(encontrados)
+        if len(encontrados) >= 5:
+            break
+
+    return _mesclar_circulos(encontrados)
+
+
+def _separar_grupos_circulos(circulos: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Agrupa círculos em blocos de 5 alternativas A-E."""
+    if not circulos:
+        return []
+
+    raios = [c["r"] for c in circulos]
+    tolerancia_y = max(10.0, float(np.median(raios)) * 1.25)
+
+    linhas: List[List[Dict[str, Any]]] = []
+    for c in sorted(circulos, key=lambda item: item["cy"]):
+        colocado = False
+        for linha in linhas:
+            media_y = float(np.mean([item["cy"] for item in linha]))
+            if abs(c["cy"] - media_y) <= tolerancia_y:
+                linha.append(c)
+                colocado = True
+                break
+        if not colocado:
+            linhas.append([c])
+
+    grupos: List[Dict[str, Any]] = []
+    for linha in linhas:
+        linha = sorted(linha, key=lambda item: item["cx"])
+        if len(linha) < 5:
+            continue
+
+        # Divide por gaps grandes. Depois, se ainda sobrar bloco grande, tenta janelas de 5.
+        gaps = [linha[i + 1]["cx"] - linha[i]["cx"] for i in range(len(linha) - 1)]
+        positivos = [g for g in gaps if g > 0]
+        gap_base = float(np.median(positivos)) if positivos else 0.0
+        limite = max(36.0, gap_base * 1.9) if gap_base else 90.0
+
+        blocos = []
+        bloco = [linha[0]]
+        for anterior, atual, gap in zip(linha, linha[1:], gaps):
+            if gap > limite:
+                blocos.append(bloco)
+                bloco = [atual]
+            else:
+                bloco.append(atual)
+        blocos.append(bloco)
+
+        for bloco in blocos:
+            if len(bloco) == 5:
+                grupos.append({"bolhas": bloco, "cx": float(np.mean([b["cx"] for b in bloco])), "cy": float(np.mean([b["cy"] for b in bloco]))})
+            elif len(bloco) > 5:
+                # Procura sequência de 5 com espaçamento mais regular.
+                melhor = None
+                melhor_var = None
+                for i in range(0, len(bloco) - 4):
+                    pedaco = bloco[i:i+5]
+                    gs = [pedaco[j+1]["cx"] - pedaco[j]["cx"] for j in range(4)]
+                    media = np.mean(gs)
+                    if media <= 0:
+                        continue
+                    var = float(np.std(gs) / media)
+                    if melhor is None or var < melhor_var:
+                        melhor = pedaco
+                        melhor_var = var
+                if melhor is not None and melhor_var is not None and melhor_var < 0.35:
+                    grupos.append({"bolhas": melhor, "cx": float(np.mean([b["cx"] for b in melhor])), "cy": float(np.mean([b["cy"] for b in melhor]))})
+
+    return grupos
+
+
+def detectar_respostas_hough(caminho_imagem: str, total_questoes: int) -> Dict[str, Any]:
+    """Fallback OMR por HoughCircles para evitar resposta NULA falsa."""
+    imagem = ler_imagem(caminho_imagem)
+    if imagem is None:
+        return {"status_omr": "erro", "mensagem": "Imagem não pôde ser lida.", "respostas": {}}
+
+    gray = cv2.cvtColor(imagem, cv2.COLOR_BGR2GRAY)
+    circulos = _detectar_circulos_hough(gray)
+    grupos = _separar_grupos_circulos(circulos)
+    mapa_questoes = _mapear_grupos_para_questoes(grupos, total_questoes)
+
+    respostas = {str(i): "NULA" for i in range(1, total_questoes + 1)}
+    confiancas = {str(i): "baixa" for i in range(1, total_questoes + 1)}
+    scores_por_questao = {}
+
+    for questao, bolhas in mapa_questoes.items():
+        if len(bolhas) != 5:
+            continue
+        scores = {}
+        for alt, bolha in zip(ALTERNATIVAS, bolhas):
+            scores[alt] = round(_pontuacao_circulo(gray, bolha), 4)
+        resposta, confianca = _decidir_alternativa_hough(scores)
+        respostas[questao] = resposta
+        confiancas[questao] = confianca
+        scores_por_questao[questao] = scores
+
+    detectadas = sum(1 for r in respostas.values() if r != "NULA")
+    status = "ok" if detectadas > 0 else "sem_marcacoes_detectadas"
+    return {
+        "status_omr": status,
+        "mensagem": "OMR executado por fallback HoughCircles." if detectadas else "Fallback HoughCircles não encontrou marcação clara.",
+        "respostas": respostas,
+        "confiancas": confiancas,
+        "questoes_mapeadas": len(mapa_questoes),
+        "bolhas_candidatas": len(circulos),
+        "marcacoes_detectadas": detectadas,
+        "scores": scores_por_questao,
+        "metodo": "hough",
+    }
+
+
+def _decidir_alternativa_hough(scores: Dict[str, float]) -> Tuple[str, str]:
+    """Decisão específica para círculos reais detectados por Hough."""
+    if not scores:
+        return "NULA", "baixa"
+
+    ordenados = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+    melhor_alt, melhor_score = ordenados[0]
+    segundo_score = ordenados[1][1] if len(ordenados) > 1 else 0.0
+    diferenca = melhor_score - segundo_score
+
+    # Bolha totalmente preenchida, comum na folha do Atlas.
+    if melhor_score >= 0.82 and diferenca >= 0.12:
+        return melhor_alt, "alta"
+
+    # Marca mais leve, mas isolada das demais.
+    if melhor_score >= 0.55 and diferenca >= 0.18:
+        return melhor_alt, "media"
+
+    # Para folhas novas sem letra dentro da bolha, os vazios ficam próximos de zero.
+    if melhor_score >= 0.35 and diferenca >= 0.20:
+        return melhor_alt, "media"
+
+    return "NULA", "baixa"
+
+
 def _decidir_alternativa(scores: Dict[str, float]) -> Tuple[str, str]:
     """Decide alternativa marcada ou NULA a partir dos preenchimentos.
 
@@ -448,7 +827,7 @@ def detectar_respostas_omr(caminho_imagem: str, total_questoes: int) -> Dict[str
         status = "ok"
         mensagem = "OMR executado com leitura real das bolhas."
 
-    return {
+    resultado_contorno = {
         "status_omr": status,
         "mensagem": mensagem,
         "respostas": respostas,
@@ -457,7 +836,22 @@ def detectar_respostas_omr(caminho_imagem: str, total_questoes: int) -> Dict[str
         "bolhas_candidatas": len(candidatos),
         "marcacoes_detectadas": detectadas,
         "scores": scores_por_questao,
+        "metodo": "contornos",
     }
+
+    # Fallback importante: em folhas antigas, as letras dentro dos círculos
+    # podem fazer o método por contornos confundir vazios com marcação.
+    # O HoughCircles procura os círculos reais e costuma corrigir esse caso.
+    if detectadas == 0 or status in ["falha_calibracao", "sem_marcacoes_detectadas", "erro"]:
+        try:
+            resultado_hough = detectar_respostas_hough(caminho_imagem, total_questoes)
+            if int(resultado_hough.get("marcacoes_detectadas") or 0) > detectadas:
+                resultado_hough["fallback_de"] = resultado_contorno
+                return resultado_hough
+        except Exception as erro:
+            resultado_contorno["erro_fallback_hough"] = str(erro)
+
+    return resultado_contorno
 
 
 def extrair_json(texto: str) -> Dict[str, Any]:

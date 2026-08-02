@@ -4,15 +4,12 @@ import hashlib
 import io
 import json
 import os
-import random
-import re
 import statistics
 import threading
 import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-from difflib import SequenceMatcher
 
 import qrcode
 from flask import Flask, request, redirect, url_for, flash, render_template, send_file, Response, stream_with_context, jsonify, session, g
@@ -20,18 +17,16 @@ from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
 
 from bd import iniciar_banco, conectar
-from corretor import corrigir_imagem_web, ler_qrcode, comparar_respostas
+from corretor import corrigir_imagem_web, ler_qrcode
 from gerador_provas import gerar_prova_enem, _criar_questao_fallback
 
 
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 QR_DIR = BASE_DIR / "static" / "qrcodes"
-QUESTAO_IMG_DIR = BASE_DIR / "static" / "questoes"
 
 UPLOAD_DIR.mkdir(exist_ok=True)
 QR_DIR.mkdir(parents=True, exist_ok=True)
-QUESTAO_IMG_DIR.mkdir(parents=True, exist_ok=True)
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret-key-troque-em-producao")
@@ -86,228 +81,47 @@ def garantir_banco_atualizado():
     return None
 
 
-def assinatura_qr(professor_id, aluno_id, prova_id, matricula=""):
-    """Assinatura simples para impedir que um QR de outra conta/prova seja aceito por engano."""
-    segredo = app.secret_key or "atlas-dev"
-    base = f"{professor_id}:{aluno_id}:{prova_id}:{matricula}:{segredo}"
-    return hashlib.sha256(base.encode("utf-8")).hexdigest()[:18]
-
-
 def gerar_qr(aluno, prova_id, titulo, disciplina):
-    professor_id = int(professor_atual_id() or aluno["professor_id"] or 1)
-    dados = {
-        "v": 2,
-        "sistema": "atlas",
-        "professor_id": professor_id,
-        "aluno_id": int(aluno["id"]),
-        "nome": aluno["nome"],
-        "matricula": aluno["matricula"],
-        "turma": aluno["turma"],
-        "prova_id": int(prova_id),
-        "titulo": titulo,
-        "disciplina": disciplina,
-    }
-    dados["assinatura"] = assinatura_qr(professor_id, dados["aluno_id"], dados["prova_id"], dados["matricula"])
+    """
+    Gera QR Code mais fácil de ler pela câmera.
 
-    nome = f"prova_{prova_id}_aluno_{aluno['id']}.png"
+    Correção aplicada:
+    - payload compacto, em vez de JSON grande com título/nome completo;
+    - error correction alto;
+    - borda maior;
+    - imagem maior e mais nítida.
+
+    O restante dos dados é buscado no banco usando prova_id + aluno_id.
+    """
+    aluno_id = int(aluno["id"])
+    professor_id = int(professor_atual_id() or 0)
+    assinatura = hashlib.sha256(f"atlas:{professor_id}:{aluno_id}:{prova_id}".encode("utf-8")).hexdigest()[:16]
+
+    dados = {
+        "v": 3,
+        "s": "atlas",
+        "p": int(prova_id),
+        "a": aluno_id,
+        "m": str(aluno["matricula"] or ""),
+        "t": str(aluno["turma"] or ""),
+        "sig": assinatura,
+    }
+
+    nome = f"prova_{prova_id}_aluno_{aluno_id}.png"
     caminho = QR_DIR / nome
 
-    img = qrcode.make(json.dumps(dados, ensure_ascii=False))
+    qr = qrcode.QRCode(
+        version=None,
+        error_correction=qrcode.constants.ERROR_CORRECT_H,
+        box_size=12,
+        border=5,
+    )
+    qr.add_data(json.dumps(dados, ensure_ascii=False, separators=(",", ":")))
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
     img.save(caminho)
 
     return nome
-
-
-def validar_qr_folha(dados_qr, prova):
-    """Valida se o QR realmente aponta para a folha/prova daquele professor.
-
-    Retorna (ok, mensagem). QRs antigos sem assinatura continuam aceitos quando
-    prova_id e aluno_id batem com o banco, para não inutilizar folhas antigas.
-    """
-    if not isinstance(dados_qr, dict):
-        return False, "QR Code não foi lido. A folha foi enviada para identificação assistida."
-    try:
-        qr_prova_id = int(dados_qr.get("prova_id") or 0)
-        qr_aluno_id = int(dados_qr.get("aluno_id") or 0)
-    except Exception:
-        return False, "QR Code incompleto ou inválido."
-    if not prova:
-        return False, "A prova apontada pelo QR não existe para este professor."
-    if qr_prova_id != int(prova["id"]):
-        return False, "QR Code aponta para outra prova."
-    if qr_aluno_id != int(prova["aluno_id"]):
-        return False, "QR Code aponta para aluno diferente da folha registrada."
-    qr_professor = dados_qr.get("professor_id")
-    if qr_professor and int(qr_professor) != int(prova["professor_id"]):
-        return False, "QR Code pertence a outro professor."
-    assinatura = dados_qr.get("assinatura")
-    if assinatura:
-        esperada = assinatura_qr(prova["professor_id"], prova["aluno_id"], prova["id"], prova["matricula"])
-        if str(assinatura) != esperada:
-            return False, "Assinatura do QR inválida."
-    return True, "QR Code validado com segurança."
-
-
-def caminho_relativo_upload(caminho: Path) -> str:
-    try:
-        return str(Path(caminho).resolve().relative_to(UPLOAD_DIR.resolve()))
-    except Exception:
-        return Path(caminho).name
-
-
-
-EXTENSOES_IMAGEM_QUESTAO = {".png", ".jpg", ".jpeg", ".webp"}
-
-
-def salvar_imagem_questao(arquivo, avaliacao_id: int, numero_questao: int):
-    """Salva imagem enviada pelo professor para ser usada no enunciado.
-
-    A imagem fica em static/questoes/ e o caminho relativo é salvo dentro do
-    JSON da questão. O Atlas valida extensão e tenta abrir com Pillow para
-    evitar arquivo corrompido ou não-imagem.
-    """
-    if not arquivo or not getattr(arquivo, "filename", ""):
-        return None
-
-    nome_seguro = secure_filename(arquivo.filename)
-    sufixo = Path(nome_seguro).suffix.lower()
-    if sufixo not in EXTENSOES_IMAGEM_QUESTAO:
-        raise ValueError("Formato de imagem inválido. Use PNG, JPG, JPEG ou WEBP.")
-
-    nome_final = f"avaliacao_{int(avaliacao_id)}_q{int(numero_questao)}_{uuid.uuid4().hex[:10]}{sufixo}"
-    destino = QUESTAO_IMG_DIR / nome_final
-    arquivo.save(destino)
-
-    try:
-        from PIL import Image, UnidentifiedImageError
-        try:
-            with Image.open(destino) as img:
-                img.verify()
-        except UnidentifiedImageError:
-            destino.unlink(missing_ok=True)
-            raise ValueError("O arquivo enviado não parece ser uma imagem válida.")
-    except ImportError:
-        # Pillow já está no requirements, mas esse fallback evita quebrar localmente.
-        pass
-
-    return f"questoes/{nome_final}"
-
-
-def limpar_visual_imagem_antiga(visual):
-    """Remove arquivo antigo de imagem se ele pertencer à pasta static/questoes."""
-    if not isinstance(visual, dict):
-        return
-    arquivo = str(visual.get("arquivo") or "")
-    if not arquivo.startswith("questoes/"):
-        return
-    caminho = (BASE_DIR / "static" / arquivo).resolve()
-    try:
-        if str(caminho).startswith(str(QUESTAO_IMG_DIR.resolve())) and caminho.exists():
-            caminho.unlink()
-    except Exception:
-        pass
-
-
-def normalizar_texto_busca(texto: str) -> str:
-    texto = str(texto or "").lower()
-    texto = re.sub(r"[^a-z0-9áéíóúàâêôãõçñ ]+", " ", texto)
-    texto = re.sub(r"\s+", " ", texto).strip()
-    return texto
-
-
-def gerar_sugestoes_alunos(conn, prova_base_id=None, texto_detectado=""):
-    """Sugere alunos para identificação manual quando QR falha.
-
-    Sem OCR pesado por padrão: usa a turma da prova base e similaridade simples
-    com qualquer texto detectado/disponível. Se OCR não estiver configurado,
-    ainda lista os alunos mais prováveis da mesma turma.
-    """
-    pid = int(professor_atual_id())
-    turma = None
-    if prova_base_id:
-        base = buscar_prova_com_aluno(conn, int(prova_base_id))
-        if base:
-            turma = base["turma"]
-    if turma:
-        alunos = conn.execute("SELECT * FROM alunos WHERE professor_id = ? AND turma = ? ORDER BY nome", (pid, turma)).fetchall()
-    else:
-        alunos = conn.execute("SELECT * FROM alunos WHERE professor_id = ? ORDER BY turma, nome", (pid,)).fetchall()
-    alvo = normalizar_texto_busca(texto_detectado)
-    sugestoes = []
-    for a in alunos:
-        nome = normalizar_texto_busca(a["nome"])
-        score = 0.35
-        if alvo:
-            score = SequenceMatcher(None, alvo, nome).ratio()
-            if str(a["matricula"]).lower() in alvo:
-                score = max(score, 0.95)
-        sugestoes.append({"id": int(a["id"]), "nome": a["nome"], "matricula": a["matricula"], "turma": a["turma"], "score": round(score * 100, 1)})
-    return sorted(sugestoes, key=lambda x: x["score"], reverse=True)[:8]
-
-
-def registrar_identificacao_pendente(conn, caminho, origem, prova_base_id=None, sessao_id=None, mensagem="QR não lido", dados_qr=None):
-    """Cria uma pendência em vez de salvar nota no aluno errado."""
-    # Evita criar uma pendência a cada frame quando a mesma folha fica parada na câmera.
-    recente = None
-    if sessao_id:
-        recente = conn.execute(
-            """
-            SELECT * FROM identificacoes_pendentes
-            WHERE professor_id = ? AND sessao_id = ? AND status = 'pendente'
-              AND datetime(criado_em) >= datetime('now', 'localtime', '-8 seconds')
-            ORDER BY id DESC LIMIT 1
-            """,
-            (int(professor_atual_id()), int(sessao_id)),
-        ).fetchone()
-    if recente:
-        return int(recente["id"])
-
-    sugestoes = gerar_sugestoes_alunos(conn, prova_base_id=prova_base_id)
-    cursor = conn.execute(
-        """
-        INSERT INTO identificacoes_pendentes
-            (professor_id, sessao_id, prova_base_id, imagem_arquivo, origem, status, mensagem, dados_qr_json, sugestoes_json, criado_em)
-        VALUES (?, ?, ?, ?, ?, 'pendente', ?, ?, ?, ?)
-        """,
-        (
-            int(professor_atual_id()),
-            int(sessao_id) if sessao_id else None,
-            int(prova_base_id) if prova_base_id else None,
-            caminho_relativo_upload(Path(caminho)),
-            origem,
-            mensagem,
-            json.dumps(dados_qr or {}, ensure_ascii=False),
-            json.dumps(sugestoes, ensure_ascii=False),
-            agora_str(),
-        ),
-    )
-    return int(cursor.lastrowid)
-
-
-def gerar_ordem_questoes(total_questoes: int, aluno_id: int, avaliacao_id: int, embaralhar: bool) -> list:
-    ordem = list(range(1, int(total_questoes) + 1))
-    if embaralhar and len(ordem) > 1:
-        rng = random.Random(f"atlas:{avaliacao_id}:{aluno_id}:{app.secret_key}")
-        rng.shuffle(ordem)
-    return ordem
-
-
-def remapear_gabarito_por_ordem(gabarito_original: dict, ordem: list) -> dict:
-    return {str(novo): str(gabarito_original.get(str(original), "A")).upper()[:1] for novo, original in enumerate(ordem, start=1)}
-
-
-def questoes_em_ordem_para_prova(avaliacao_dict: dict, ordem: list) -> list:
-    questoes = avaliacao_dict.get("questoes", []) or []
-    por_numero = {int(q.get("numero", i + 1)): q for i, q in enumerate(questoes)}
-    saida = []
-    for novo, original in enumerate(ordem, start=1):
-        q = dict(por_numero.get(int(original), {}))
-        if not q:
-            continue
-        q["numero_original"] = int(original)
-        q["numero"] = int(novo)
-        saida.append(q)
-    return saida
 
 
 def _ordenar_mapa_questoes(mapa):
@@ -415,23 +229,16 @@ def buscar_questoes_cache(materias: str, temas: str, total: int, professor_id=No
         questoes = []
         for i, row in enumerate(rows, start=1):
             alternativas = carregar_json_seguro(row["alternativas_json"], {})
-            colunas = set(row.keys())
             questoes.append(
                 {
                     "numero": i,
                     "area": row["materia"],
                     "tema": row["tema"] or "",
-                    "dificuldade": row["dificuldade"] or "medio",
-                    "tipo_questao": row["tipo_questao"] if "tipo_questao" in colunas else "",
                     "contexto": row["contexto"] or "",
-                    "elemento_visual": carregar_json_seguro(row["visual_json"], {}) if "visual_json" in colunas else {},
-                    "dados_calculo": carregar_json_seguro(row["calculo_json"], {}) if "calculo_json" in colunas else {},
                     "enunciado": row["enunciado"],
                     "alternativas": alternativas,
                     "correta": str(row["correta"] or "A").upper()[:1],
                     "habilidade": row["habilidade"] or "",
-                    "competencia": row["competencia"] if "competencia" in colunas else "",
-                    "resolucao": carregar_json_seguro(row["resolucao_json"], []) if "resolucao_json" in colunas else [],
                     "explicacao": row["explicacao"] or "",
                     "origem_cache_id": row["id"],
                 }
@@ -466,9 +273,8 @@ def salvar_questoes_no_cache(prova_gerada, professor_id=None):
                 """
                 INSERT OR IGNORE INTO questoes_cache
                     (professor_id, materia, tema, dificuldade, modelo, contexto, enunciado, alternativas_json, correta,
-                     habilidade, explicacao, visual_json, calculo_json, resolucao_json, tipo_questao, competencia,
-                     origem, hash, aprovado, usado_vezes, criado_em, atualizado_em)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
+                     habilidade, explicacao, origem, hash, aprovado, usado_vezes, criado_em, atualizado_em)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
                 """,
                 (
                     int(professor_id) if professor_id else None,
@@ -482,11 +288,6 @@ def salvar_questoes_no_cache(prova_gerada, professor_id=None):
                     str(q.get("correta") or "A").upper()[:1],
                     str(q.get("habilidade") or ""),
                     str(q.get("explicacao") or ""),
-                    json.dumps(q.get("elemento_visual") or {}, ensure_ascii=False),
-                    json.dumps(q.get("dados_calculo") or {}, ensure_ascii=False),
-                    json.dumps(q.get("resolucao") or [], ensure_ascii=False),
-                    str(q.get("tipo_questao") or ""),
-                    str(q.get("competencia") or ""),
                     modo or "ia",
                     h,
                     agora_str(),
@@ -870,8 +671,9 @@ def converter_pdf_para_imagens(caminho_pdf: Path):
 
     try:
         for indice, pagina in enumerate(documento, start=1):
-            # 2.5x melhora a leitura do QR e das bolhas sem deixar o arquivo absurdo.
-            matriz = fitz.Matrix(2.5, 2.5)
+            # 3x melhora a leitura do QR e das bolhas.
+            # O QR antigo falhava em 2.5x em algumas folhas.
+            matriz = fitz.Matrix(3.0, 3.0)
             pix = pagina.get_pixmap(matrix=matriz, alpha=False)
             caminho_img = UPLOAD_DIR / f"{caminho_pdf.stem}_pagina_{indice}.jpg"
             pix.save(str(caminho_img))
@@ -952,13 +754,13 @@ def buscar_prova_com_aluno(conn, prova_id: int):
 
 def recalcular_sessao_scan(conn, sessao_id: int):
     linhas = conn.execute(
-        "SELECT status, latencia_ms FROM leituras_scan WHERE sessao_id = ? AND status != 'duplicado'",
+        "SELECT status, latencia_ms FROM leituras_scan WHERE sessao_id = ?",
         (int(sessao_id),),
     ).fetchall()
 
     total = len(linhas)
     sucesso = sum(1 for l in linhas if l["status"] == "ok")
-    revisao = sum(1 for l in linhas if l["status"] in ["revisao", "identificacao", "qr_falhou"])
+    revisao = total - sucesso
     tempos = [float(l["latencia_ms"] or 0) for l in linhas if l["latencia_ms"] is not None]
     tempo_medio = round(sum(tempos) / len(tempos), 2) if tempos else 0
 
@@ -977,6 +779,7 @@ def recalcular_sessao_scan(conn, sessao_id: int):
         "total_revisao": revisao,
         "tempo_medio_ms": tempo_medio,
     }
+
 
 def carregar_resumo_sessao_scan(sessao_id: int):
     conn = conectar()
@@ -1172,117 +975,6 @@ def _texto_pdf(c, texto, x, y, largura, fonte="Helvetica", tamanho=10, entrelinh
     return y
 
 
-def _garantir_espaco_pdf(c, y, minimo=120):
-    from reportlab.lib.pagesizes import A4
-    _, altura_pagina = A4
-    if y < minimo:
-        c.showPage()
-        return altura_pagina - 50
-    return y
-
-
-def _desenhar_visual_pdf(c, visual, x, y, largura):
-    """Desenha tabelas, gráficos simples e esquemas no PDF da prova sem depender de imagem externa."""
-    if not isinstance(visual, dict) or not visual:
-        return y
-
-    y = _garantir_espaco_pdf(c, y, 135)
-    tipo = str(visual.get("tipo") or "diagrama").lower()
-    titulo = str(visual.get("titulo") or "Elemento visual")[:90]
-    fonte = str(visual.get("fonte") or "Elaboração própria/Atlas")[:80]
-
-    c.setFont("Helvetica-Bold", 9)
-    c.drawString(x, y, titulo)
-    y -= 12
-
-    if tipo in ["imagem_upload", "imagem"] and visual.get("arquivo"):
-        try:
-            from PIL import Image
-            from reportlab.lib.utils import ImageReader
-            arquivo_rel = str(visual.get("arquivo") or "").lstrip("/")
-            caminho_img = (BASE_DIR / "static" / arquivo_rel).resolve()
-            static_base = (BASE_DIR / "static").resolve()
-            if not str(caminho_img).startswith(str(static_base)) or not caminho_img.exists():
-                raise FileNotFoundError("Imagem da questão não encontrada.")
-
-            with Image.open(caminho_img) as img:
-                iw, ih = img.size
-            max_w = largura
-            max_h = 230
-            escala = min(max_w / max(iw, 1), max_h / max(ih, 1), 1.0)
-            draw_w = iw * escala
-            draw_h = ih * escala
-            y = _garantir_espaco_pdf(c, y, int(draw_h) + 65)
-            c.drawImage(ImageReader(str(caminho_img)), x, y - draw_h, width=draw_w, height=draw_h, preserveAspectRatio=True, mask="auto")
-            y -= draw_h + 8
-        except Exception:
-            desc = str(visual.get("descricao") or "Imagem enviada pelo professor não pôde ser carregada no PDF.")
-            y = _texto_pdf(c, "Imagem: " + desc, x, y, largura, tamanho=8, entrelinha=11)
-
-    elif tipo == "tabela":
-        colunas = visual.get("colunas") if isinstance(visual.get("colunas"), list) else []
-        linhas = visual.get("linhas") if isinstance(visual.get("linhas"), list) else []
-        if colunas:
-            c.setFont("Helvetica-Bold", 8)
-            col_w = largura / max(len(colunas), 1)
-            for idx, col in enumerate(colunas):
-                c.rect(x + idx * col_w, y - 4, col_w, 14, stroke=1, fill=0)
-                c.drawString(x + idx * col_w + 3, y, str(col)[:22])
-            y -= 14
-        c.setFont("Helvetica", 8)
-        col_count = max(len(colunas), 1)
-        col_w = largura / col_count
-        for linha in linhas[:7]:
-            if not isinstance(linha, list):
-                linha = [linha]
-            y = _garantir_espaco_pdf(c, y, 80)
-            for idx in range(col_count):
-                valor = str(linha[idx] if idx < len(linha) else "")[:24]
-                c.rect(x + idx * col_w, y - 4, col_w, 13, stroke=1, fill=0)
-                c.drawString(x + idx * col_w + 3, y, valor)
-            y -= 13
-        y -= 5
-    elif tipo in ["grafico_barras", "grafico_linha"]:
-        dados = visual.get("dados") if isinstance(visual.get("dados"), list) else []
-        maxv = max([float(d.get("valor") or 0) for d in dados if isinstance(d, dict)] or [1])
-        c.setFont("Helvetica", 8)
-        for d in dados[:7]:
-            if not isinstance(d, dict):
-                continue
-            rotulo = str(d.get("rotulo") or "Item")[:18]
-            valor = float(d.get("valor") or 0)
-            bar_w = (valor / maxv) * (largura - 95) if maxv else 0
-            y = _garantir_espaco_pdf(c, y, 80)
-            c.drawString(x, y, rotulo)
-            c.rect(x + 70, y - 3, bar_w, 8, stroke=1, fill=0)
-            c.drawString(x + 75 + bar_w, y, str(round(valor, 2)))
-            y -= 13
-        y -= 4
-    else:
-        desc = str(visual.get("descricao") or "Figura esquemática gerada pelo Atlas.")
-        y = _texto_pdf(c, "Figura/diagrama: " + desc, x, y, largura, tamanho=8, entrelinha=11)
-        itens = visual.get("itens") if isinstance(visual.get("itens"), list) else []
-        if itens:
-            y = _texto_pdf(c, "Fluxo: " + " → ".join(str(i) for i in itens[:6]), x + 8, y, largura - 8, tamanho=8, entrelinha=11)
-
-    c.setFont("Helvetica-Oblique", 7)
-    c.drawString(x, y, f"Fonte: {fonte}")
-    return y - 12
-
-
-def _texto_calculo_pdf(q):
-    calc = q.get("dados_calculo") if isinstance(q.get("dados_calculo"), dict) else {}
-    if not calc:
-        return ""
-    partes = []
-    if calc.get("formula"):
-        partes.append(f"Fórmula/dado de apoio: {calc.get('formula')}")
-    valores = calc.get("valores") if isinstance(calc.get("valores"), dict) else {}
-    if valores:
-        partes.append("Valores: " + "; ".join(f"{k}={v}" for k, v in list(valores.items())[:6]))
-    return " | ".join(partes)
-
-
 def gerar_pdf_prova(avaliacao, incluir_gabarito=False):
     """Gera PDF pronto para impressão da prova ou do gabarito do professor."""
     from reportlab.lib.pagesizes import A4
@@ -1334,13 +1026,9 @@ def gerar_pdf_prova(avaliacao, incluir_gabarito=False):
         c.drawString(margem, y, "Explicações resumidas")
         y -= 18
         for q in dados["questoes"]:
-            texto_explicacao = f"{str(q.get('numero')).zfill(2)}. {q.get('explicacao', '')}"
-            resolucao = q.get("resolucao") if isinstance(q.get("resolucao"), list) else []
-            if resolucao:
-                texto_explicacao += " Resolução: " + " | ".join(str(p) for p in resolucao[:5])
             y = _texto_pdf(
                 c,
-                texto_explicacao,
+                f"{str(q.get('numero')).zfill(2)}. {q.get('explicacao', '')}",
                 margem,
                 y,
                 largura_texto,
@@ -1359,11 +1047,6 @@ def gerar_pdf_prova(avaliacao, incluir_gabarito=False):
             y -= 14
             y = _texto_pdf(c, q.get("contexto", ""), margem, y, largura_texto, tamanho=9, entrelinha=12)
             y -= 3
-            y = _desenhar_visual_pdf(c, q.get("elemento_visual"), margem, y, largura_texto)
-            apoio_calculo = _texto_calculo_pdf(q)
-            if apoio_calculo:
-                y = _texto_pdf(c, apoio_calculo, margem, y, largura_texto, fonte="Helvetica-Oblique", tamanho=8, entrelinha=11)
-                y -= 2
             y = _texto_pdf(c, q.get("enunciado", ""), margem, y, largura_texto, fonte="Helvetica-Bold", tamanho=10, entrelinha=13)
             y -= 4
 
@@ -1458,37 +1141,6 @@ def folha(prova_id):
 
 
 
-
-@app.route("/prova/<int:prova_id>/imprimir")
-def imprimir_prova_personalizada(prova_id):
-    conn = conectar()
-    try:
-        prova = conn.execute(
-            """
-            SELECT provas.*, alunos.nome AS aluno_nome, alunos.matricula, alunos.turma
-            FROM provas
-            JOIN alunos ON alunos.id = provas.aluno_id
-            WHERE provas.id = ? AND provas.professor_id = ?
-            """,
-            (int(prova_id), int(professor_atual_id())),
-        ).fetchone()
-        if not prova:
-            flash("Prova personalizada não encontrada.", "warning")
-            return redirect(url_for("home"))
-        avaliacao = carregar_avaliacao(int(prova["avaliacao_id"])) if prova["avaliacao_id"] else None
-    finally:
-        conn.close()
-    if not avaliacao:
-        flash("A avaliação original não foi encontrada.", "warning")
-        return redirect(url_for("home"))
-    dados_avaliacao = montar_dados_avaliacao(avaliacao)
-    ordem = carregar_json_seguro(prova["ordem_questoes_json"], []) if "ordem_questoes_json" in prova.keys() else []
-    if not ordem:
-        ordem = list(range(1, int(prova["total_questoes"] or dados_avaliacao["total_questoes"]) + 1))
-    questoes = questoes_em_ordem_para_prova(dados_avaliacao, ordem)
-    return render_template("prova_personalizada.html", prova=prova, avaliacao=dados_avaliacao, questoes=questoes, ordem=ordem)
-
-
 @app.route("/gerar-prova-automatica", methods=["POST"])
 def gerar_prova_automatica():
     """
@@ -1501,15 +1153,6 @@ def gerar_prova_automatica():
     materias = request.form.get("materias_auto", "Conhecimentos gerais")
     temas = request.form.get("temas_auto", "")
     especificacoes = request.form.get("especificacoes_auto", "")
-    preferencias_qualidade = []
-    if request.form.get("questoes_completas_auto") == "on":
-        preferencias_qualidade.append("Gerar questões mais completas, contextualizadas e menos rasas.")
-    if request.form.get("usar_calculos_auto") == "on":
-        preferencias_qualidade.append("Incluir cálculos, fórmulas, dados numéricos e resolução passo a passo quando fizer sentido.")
-    if request.form.get("usar_visuais_auto") == "on":
-        preferencias_qualidade.append("Incluir elementos visuais renderizáveis pelo Atlas, como tabelas, gráficos, esquemas e diagramas próprios, sem links externos.")
-    if preferencias_qualidade:
-        especificacoes = (especificacoes + "\n" if especificacoes else "") + "Preferências de qualidade: " + " ".join(preferencias_qualidade)
     # Modo interno fixo: o professor não escolhe mais o modo.
     # O sistema decide automaticamente entre cache, IA e fallback para manter rapidez e estabilidade.
     modo_geracao = "inteligente"
@@ -1660,8 +1303,7 @@ def selecionar_alunos_avaliacao(avaliacao_id):
             return redirect(url_for("selecionar_alunos_avaliacao", avaliacao_id=avaliacao_id))
 
         dados_avaliacao = montar_dados_avaliacao(avaliacao)
-        gabarito_original = dados_avaliacao["gabarito_professor"]
-        embaralhar_questoes = request.form.get("embaralhar_questoes") == "on"
+        gabarito_json = json.dumps(dados_avaliacao["gabarito_professor"], ensure_ascii=False)
         folhas_geradas = []
         ja_existentes = []
 
@@ -1680,14 +1322,11 @@ def selecionar_alunos_avaliacao(avaliacao_id):
                 folhas_geradas.append(existente)
                 continue
 
-            ordem_questoes = gerar_ordem_questoes(dados_avaliacao["total_questoes"], aluno_id, avaliacao_id, embaralhar_questoes)
-            gabarito_folha = remapear_gabarito_por_ordem(gabarito_original, ordem_questoes)
-            mapa_questoes = {str(novo): int(original) for novo, original in enumerate(ordem_questoes, start=1)}
             cursor = conn.execute(
                 """
                 INSERT INTO provas
-                    (professor_id, titulo, disciplina, aluno_id, total_questoes, gabarito_json, qr_arquivo, criado_em, avaliacao_id, ordem_questoes_json, mapa_questoes_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (professor_id, titulo, disciplina, aluno_id, total_questoes, gabarito_json, qr_arquivo, criado_em, avaliacao_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     int(professor_atual_id()),
@@ -1695,12 +1334,10 @@ def selecionar_alunos_avaliacao(avaliacao_id):
                     dados_avaliacao["materias"],
                     aluno_id,
                     dados_avaliacao["total_questoes"],
-                    json.dumps(gabarito_folha, ensure_ascii=False),
+                    gabarito_json,
                     None,
                     datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     avaliacao_id,
-                    json.dumps(ordem_questoes, ensure_ascii=False),
-                    json.dumps(mapa_questoes, ensure_ascii=False),
                 ),
             )
             prova_id = cursor.lastrowid
@@ -1841,7 +1478,7 @@ def finalizar_sessao_scan_rota():
     conn = conectar()
     try:
         conn.execute(
-            "UPDATE sessoes_scan SET status = 'finalizada', finalizado_em = ? WHERE id = ? AND professor_id = ?",
+            "UPDATE sessoes_scan SET status = 'finalizada', finalizada_em = ? WHERE id = ? AND professor_id = ?",
             (agora_str(), sessao_id, int(professor_atual_id())),
         )
         resumo = recalcular_sessao_scan(conn, sessao_id)
@@ -1853,11 +1490,7 @@ def finalizar_sessao_scan_rota():
 
 @app.route("/scan/processar-frame", methods=["POST"])
 def processar_frame_scan_rota():
-    """Recebe um frame da câmera.
-
-    Regra de segurança: QR falhou => NÃO salva resultado no aluno/prova base.
-    A imagem vira uma pendência de identificação assistida.
-    """
+    """Recebe um frame da câmera, corrige por OpenCV e devolve o resultado em JSON."""
     dados = request.get_json(silent=True) or {}
 
     try:
@@ -1866,9 +1499,11 @@ def processar_frame_scan_rota():
     except Exception:
         return jsonify({"ok": False, "status": "erro", "mensagem": "Sessão ou prova inválida."}), 400
 
+    imagem_data_url = dados.get("imagem")
     inicio = time.perf_counter()
+
     try:
-        caminho = salvar_frame_base64(dados.get("imagem"))
+        caminho = salvar_frame_base64(imagem_data_url)
     except Exception as erro:
         return jsonify({"ok": False, "status": "erro", "mensagem": str(erro)}), 400
 
@@ -1883,76 +1518,50 @@ def processar_frame_scan_rota():
             return jsonify({"ok": False, "status": "erro", "mensagem": "Prova base não encontrada."}), 404
 
         dados_qr = ler_qrcode(str(caminho))
-        if not dados_qr or not dados_qr.get("prova_id"):
+
+        # REGRA DE SEGURANÇA: QR falhou = não salva nota automaticamente.
+        # Isso impede o bug de registrar a nota no aluno da prova base.
+        if not dados_qr or not dados_qr.get("prova_id") or not dados_qr.get("aluno_id"):
             latencia_ms = round((time.perf_counter() - inicio) * 1000, 2)
-            pendente_id = registrar_identificacao_pendente(
-                conn, caminho, origem="scan", prova_base_id=prova_base_id, sessao_id=sessao_id,
-                mensagem="QR Code não foi lido. Confirme manualmente antes de salvar a nota.", dados_qr=dados_qr,
+            pendencia_id = salvar_pendencia_identificacao(
+                conn,
+                caminho,
+                origem="scan",
+                mensagem="QR Code não lido durante o Scan.",
             )
-            # Registra como revisão da sessão, sem resultado e sem aluno forçado.
-            conn.execute(
-                """
-                INSERT INTO leituras_scan
-                    (sessao_id, aluno_id, prova_id, resultado_id, nota_percentual, latencia_ms, status, mensagem, criado_em)
-                VALUES (?, NULL, ?, NULL, NULL, ?, 'identificacao', ?, ?)
-                """,
-                (sessao_id, prova_base_id, latencia_ms, f"QR falhou. Pendência #{pendente_id} criada.", agora_str()),
-            )
-            resumo = recalcular_sessao_scan(conn, sessao_id)
             conn.commit()
             return jsonify({
-                "ok": True,
-                "status": "identificacao",
-                "mensagem": "QR não lido. Não salvei nota. Abra Identificação Assistida para confirmar o aluno.",
-                "pendente_id": pendente_id,
-                "url_pendente": url_for("identificacoes_pendentes"),
-                "aluno": "Identificação pendente",
-                "prova": prova_base["titulo"],
-                "nota_percentual": None,
+                "ok": False,
+                "status": "qr_nao_lido",
+                "mensagem": "QR Code não lido. A folha foi enviada para Identificação Manual e nada foi salvo em aluno errado.",
+                "pendencia_id": pendencia_id,
+                "pendencia_url": url_for("resolver_identificacao_pendente", pendencia_id=pendencia_id),
                 "latencia_ms": latencia_ms,
-                "resumo": resumo,
-            })
+                "resumo": recalcular_sessao_scan(conn, sessao_id),
+            }), 200
 
         prova_corrigir = buscar_prova_com_aluno(conn, int(dados_qr["prova_id"]))
-        ok_qr, msg_qr = validar_qr_folha(dados_qr, prova_corrigir)
-        if not ok_qr:
+        if not prova_corrigir:
             latencia_ms = round((time.perf_counter() - inicio) * 1000, 2)
-            pendente_id = registrar_identificacao_pendente(
-                conn, caminho, origem="scan", prova_base_id=prova_base_id, sessao_id=sessao_id,
-                mensagem=msg_qr, dados_qr=dados_qr,
-            )
-            conn.execute(
-                """
-                INSERT INTO leituras_scan
-                    (sessao_id, aluno_id, prova_id, resultado_id, nota_percentual, latencia_ms, status, mensagem, criado_em)
-                VALUES (?, NULL, ?, NULL, NULL, ?, 'identificacao', ?, ?)
-                """,
-                (sessao_id, prova_base_id, latencia_ms, f"{msg_qr} Pendência #{pendente_id} criada.", agora_str()),
-            )
-            resumo = recalcular_sessao_scan(conn, sessao_id)
-            conn.commit()
             return jsonify({
-                "ok": True,
-                "status": "identificacao",
-                "mensagem": msg_qr + " Não salvei nota; confirme manualmente.",
-                "pendente_id": pendente_id,
-                "url_pendente": url_for("identificacoes_pendentes"),
-                "aluno": "Identificação pendente",
-                "prova": prova_base["titulo"],
-                "nota_percentual": None,
+                "ok": False,
+                "status": "qr_invalido",
+                "mensagem": "QR lido, mas a prova não existe ou pertence a outro professor. Nada foi salvo.",
                 "latencia_ms": latencia_ms,
-                "resumo": resumo,
-            })
+                "resumo": recalcular_sessao_scan(conn, sessao_id),
+            }), 200
 
-        aluno_id = int(prova_corrigir["aluno_id"])
+        aluno_id = int(dados_qr["aluno_id"])
         prova_id = int(prova_corrigir["id"])
+        mensagem_qr = "QR lido com sucesso."
 
+        # Evita salvar a mesma folha repetidamente durante uma sessão em lote.
         leitura_existente = conn.execute(
             """
             SELECT leituras_scan.*, resultados.nota_percentual
             FROM leituras_scan
             LEFT JOIN resultados ON resultados.id = leituras_scan.resultado_id
-            WHERE leituras_scan.sessao_id = ? AND leituras_scan.aluno_id = ? AND leituras_scan.prova_id = ? AND leituras_scan.status != 'duplicado'
+            WHERE leituras_scan.sessao_id = ? AND leituras_scan.aluno_id = ? AND leituras_scan.prova_id = ?
             ORDER BY leituras_scan.id DESC
             LIMIT 1
             """,
@@ -1979,18 +1588,18 @@ def processar_frame_scan_rota():
             gabarito_oficial=gabarito_oficial,
             usar_ia=False,
         )
-        resultado["dados_qr"] = dados_qr
-        resultado.setdefault("processamento", {})["validacao_qr"] = msg_qr
-        if "mapa_questoes_json" in prova_corrigir.keys():
-            resultado["mapa_questoes"] = carregar_json_seguro(prova_corrigir["mapa_questoes_json"], {})
+        if dados_qr and not resultado.get("dados_qr"):
+            resultado["dados_qr"] = dados_qr
 
         nota = float(resultado["resultado"]["nota_percentual"])
         processamento = resultado.get("processamento", {})
         omr = processamento.get("omr", {}) if isinstance(processamento, dict) else {}
         status_omr = omr.get("status_omr", "")
         confianca_baixa = status_omr in ["falha_calibracao", "sem_marcacoes_detectadas", "erro"]
-        status_leitura = "revisao" if confianca_baixa else "ok"
-        mensagem = msg_qr
+        sem_qr = False
+
+        status_leitura = "revisao" if confianca_baixa or sem_qr else "ok"
+        mensagem = mensagem_qr
         if confianca_baixa:
             mensagem = f"{mensagem} Leitura OMR precisa de revisão: {omr.get('mensagem', status_omr)}"
 
@@ -2008,8 +1617,13 @@ def processar_frame_scan_rota():
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                int(professor_atual_id()), aluno_id, prova_id, nota,
-                json.dumps(resultado, ensure_ascii=False), status_leitura, agora_str(),
+                int(professor_atual_id()),
+                aluno_id,
+                prova_id,
+                nota,
+                json.dumps(resultado, ensure_ascii=False),
+                status_leitura,
+                agora_str(),
             ),
         )
         resultado_id = cursor.lastrowid
@@ -2020,11 +1634,22 @@ def processar_frame_scan_rota():
                 (sessao_id, aluno_id, prova_id, resultado_id, nota_percentual, latencia_ms, status, mensagem, criado_em)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (sessao_id, aluno_id, prova_id, resultado_id, nota, latencia_ms, status_leitura, mensagem, agora_str()),
+            (
+                sessao_id,
+                aluno_id,
+                prova_id,
+                resultado_id,
+                nota,
+                latencia_ms,
+                status_leitura,
+                mensagem,
+                agora_str(),
+            ),
         )
 
         resumo = recalcular_sessao_scan(conn, sessao_id)
         conn.commit()
+
         return jsonify({
             "ok": True,
             "status": status_leitura,
@@ -2041,7 +1666,6 @@ def processar_frame_scan_rota():
             "total_questoes": resultado["resultado"].get("total_questoes_oficial", 0),
             "latencia_ms": latencia_ms,
             "lento": latencia_ms >= 1500,
-            "url_revisao": url_for("revisar_resultado", resultado_id=resultado_id),
             "resumo": resumo,
         })
     except Exception as erro:
@@ -2288,63 +1912,15 @@ def editar_avaliacao(avaliacao_id):
             correta = request.form.get(f"q{i}_correta", "A").strip().upper()[:1]
             if correta not in ["A", "B", "C", "D", "E"]:
                 correta = "A"
-            antigo = dados["questoes"][i - 1] if i - 1 < len(dados.get("questoes", [])) else {}
-            visual_txt = request.form.get(f"q{i}_elemento_visual_json", "").strip()
-            calculo_txt = request.form.get(f"q{i}_dados_calculo_json", "").strip()
-            try:
-                elemento_visual = json.loads(visual_txt) if visual_txt else (antigo.get("elemento_visual") or {})
-            except Exception:
-                elemento_visual = antigo.get("elemento_visual") or {}
-            try:
-                dados_calculo = json.loads(calculo_txt) if calculo_txt else (antigo.get("dados_calculo") or {})
-            except Exception:
-                dados_calculo = antigo.get("dados_calculo") or {}
-            resolucao_txt = request.form.get(f"q{i}_resolucao", "").strip()
-            resolucao = [p.strip() for p in resolucao_txt.split("\n") if p.strip()] if resolucao_txt else (antigo.get("resolucao") or [])
-
-            # Imagem enviada pelo professor para a questão.
-            # Ela substitui o elemento visual JSON apenas naquela questão.
-            if request.form.get(f"q{i}_remover_imagem") == "1":
-                limpar_visual_imagem_antiga(elemento_visual)
-                elemento_visual = {}
-
-            imagem_upload = request.files.get(f"q{i}_imagem_upload")
-            if imagem_upload and imagem_upload.filename:
-                try:
-                    arquivo_estatico = salvar_imagem_questao(imagem_upload, avaliacao_id, i)
-                except ValueError as erro:
-                    flash(str(erro), "danger")
-                    return redirect(url_for("editar_avaliacao", avaliacao_id=avaliacao_id))
-
-                limpar_visual_imagem_antiga(elemento_visual)
-                elemento_visual = {
-                    "tipo": "imagem_upload",
-                    "titulo": request.form.get(f"q{i}_imagem_titulo", "").strip() or f"Imagem da questão {i}",
-                    "descricao": request.form.get(f"q{i}_imagem_descricao", "").strip(),
-                    "fonte": request.form.get(f"q{i}_imagem_fonte", "").strip() or "Imagem enviada pelo professor",
-                    "arquivo": arquivo_estatico,
-                }
-            elif isinstance(elemento_visual, dict) and elemento_visual.get("tipo") == "imagem_upload":
-                # Permite editar título/fonte/descrição da imagem já enviada sem reanexar o arquivo.
-                elemento_visual["titulo"] = request.form.get(f"q{i}_imagem_titulo", "").strip() or elemento_visual.get("titulo") or f"Imagem da questão {i}"
-                elemento_visual["descricao"] = request.form.get(f"q{i}_imagem_descricao", "").strip()
-                elemento_visual["fonte"] = request.form.get(f"q{i}_imagem_fonte", "").strip() or elemento_visual.get("fonte") or "Imagem enviada pelo professor"
-
             questoes.append({
                 "numero": i,
                 "area": request.form.get(f"q{i}_area", "").strip(),
                 "tema": request.form.get(f"q{i}_tema", "").strip(),
-                "dificuldade": request.form.get(f"q{i}_dificuldade", antigo.get("dificuldade", "medio")).strip() or "medio",
-                "tipo_questao": request.form.get(f"q{i}_tipo_questao", antigo.get("tipo_questao", "")).strip(),
                 "habilidade": request.form.get(f"q{i}_habilidade", "").strip(),
-                "competencia": request.form.get(f"q{i}_competencia", antigo.get("competencia", "")).strip(),
                 "contexto": request.form.get(f"q{i}_contexto", "").strip(),
-                "elemento_visual": elemento_visual,
-                "dados_calculo": dados_calculo,
                 "enunciado": request.form.get(f"q{i}_enunciado", "").strip(),
                 "alternativas": alts,
                 "correta": correta,
-                "resolucao": resolucao,
                 "explicacao": request.form.get(f"q{i}_explicacao", "").strip(),
             })
             gabarito[str(i)] = correta
@@ -2367,271 +1943,16 @@ def editar_avaliacao(avaliacao_id):
     return render_template("editar_avaliacao.html", avaliacao=dados)
 
 
-
-def corrigir_pendente_com_prova(conn, pendente, prova):
-    caminho = UPLOAD_DIR / pendente["imagem_arquivo"]
-    if not caminho.exists():
-        raise RuntimeError("Imagem pendente não encontrada no servidor.")
-    gabarito_oficial = json.loads(prova["gabarito_json"])
-    resultado = corrigir_imagem_web(str(caminho), gabarito_oficial, usar_ia="auto")
-    resultado.setdefault("processamento", {})["identificacao_assistida"] = {
-        "pendente_id": int(pendente["id"]),
-        "confirmado_em": agora_str(),
-        "observacao": "QR falhou ou ficou inválido; professor confirmou a folha manualmente.",
-    }
-    if "mapa_questoes_json" in prova.keys():
-        resultado["mapa_questoes"] = carregar_json_seguro(prova["mapa_questoes_json"], {})
-    nota = float(resultado["resultado"]["nota_percentual"])
-    cursor = conn.execute(
-        """
-        INSERT INTO resultados (professor_id, aluno_id, prova_id, nota_percentual, resultado_json, status_confianca, criado_em)
-        VALUES (?, ?, ?, ?, ?, 'revisao_manual_qr', ?)
-        """,
-        (int(professor_atual_id()), int(prova["aluno_id"]), int(prova["id"]), nota, json.dumps(resultado, ensure_ascii=False), agora_str()),
-    )
-    resultado_id = int(cursor.lastrowid)
-    conn.execute(
-        """
-        UPDATE identificacoes_pendentes
-        SET status = 'resolvida', resultado_id = ?, resolvido_em = ?
-        WHERE id = ? AND professor_id = ?
-        """,
-        (resultado_id, agora_str(), int(pendente["id"]), int(professor_atual_id())),
-    )
-    return resultado_id
-
-
-@app.route("/identificacao-pendente")
-def identificacoes_pendentes():
-    conn = conectar()
-    try:
-        pendentes = conn.execute(
-            """
-            SELECT ip.*, provas.titulo AS prova_base_titulo
-            FROM identificacoes_pendentes ip
-            LEFT JOIN provas ON provas.id = ip.prova_base_id
-            WHERE ip.professor_id = ? AND ip.status = 'pendente'
-            ORDER BY ip.id DESC
-            """,
-            (int(professor_atual_id()),),
-        ).fetchall()
-    finally:
-        conn.close()
-    return render_template("identificacoes_pendentes.html", pendentes=pendentes)
-
-
-@app.route("/identificacao-pendente/<int:pendente_id>", methods=["GET", "POST"])
-def resolver_identificacao_pendente(pendente_id):
-    conn = conectar()
-    try:
-        pendente = conn.execute(
-            "SELECT * FROM identificacoes_pendentes WHERE id = ? AND professor_id = ?",
-            (int(pendente_id), int(professor_atual_id())),
-        ).fetchone()
-        if not pendente:
-            flash("Pendência não encontrada.", "warning")
-            return redirect(url_for("identificacoes_pendentes"))
-
-        if request.method == "POST":
-            prova_id = int(request.form.get("prova_id") or 0)
-            prova = buscar_prova_com_aluno(conn, prova_id)
-            if not prova:
-                flash("Escolha uma folha/prova válida para salvar a correção.", "warning")
-                return redirect(url_for("resolver_identificacao_pendente", pendente_id=pendente_id))
-            resultado_id = corrigir_pendente_com_prova(conn, pendente, prova)
-            conn.commit()
-            flash("Folha identificada e corrigida com revisão manual de QR.", "success")
-            return redirect(url_for("ver_resultado_detalhado", resultado_id=resultado_id))
-
-        sugestoes = carregar_json_seguro(pendente["sugestoes_json"], [])
-        prova_base = buscar_prova_com_aluno(conn, int(pendente["prova_base_id"])) if pendente["prova_base_id"] else None
-        if prova_base and prova_base["avaliacao_id"]:
-            provas = conn.execute(
-                """
-                SELECT provas.*, alunos.nome AS aluno_nome, alunos.matricula, alunos.turma
-                FROM provas JOIN alunos ON alunos.id = provas.aluno_id
-                WHERE provas.professor_id = ? AND provas.avaliacao_id = ?
-                ORDER BY alunos.turma, alunos.nome
-                """,
-                (int(professor_atual_id()), int(prova_base["avaliacao_id"])),
-            ).fetchall()
-        else:
-            provas = conn.execute(
-                """
-                SELECT provas.*, alunos.nome AS aluno_nome, alunos.matricula, alunos.turma
-                FROM provas JOIN alunos ON alunos.id = provas.aluno_id
-                WHERE provas.professor_id = ?
-                ORDER BY provas.id DESC LIMIT 200
-                """,
-                (int(professor_atual_id()),),
-            ).fetchall()
-    finally:
-        conn.close()
-    return render_template("resolver_identificacao.html", pendente=pendente, sugestoes=sugestoes, provas=provas)
-
-
-@app.route("/uploads/<path:nome>")
-def ver_upload(nome):
-    caminho = (UPLOAD_DIR / nome).resolve()
-    if not str(caminho).startswith(str(UPLOAD_DIR.resolve())) or not caminho.exists():
-        return "Arquivo não encontrado", 404
-    return send_file(caminho)
-
-
-@app.route("/resultado/<int:resultado_id>/revisar", methods=["GET", "POST"])
-def revisar_resultado(resultado_id):
-    resultado = carregar_resultado_detalhado(resultado_id)
-    if not resultado:
-        flash("Resultado não encontrado.", "warning")
-        return redirect(url_for("home"))
-    dados = carregar_json_seguro(resultado["resultado_json"], {})
-    gabarito = carregar_json_seguro(resultado["gabarito_json"], {})
-    gabarito = _ordenar_mapa_questoes(gabarito)
-
-    if request.method == "POST":
-        respostas = {}
-        for q in gabarito.keys():
-            alt = str(request.form.get(f"q{q}", "NULA")).upper().strip()
-            if alt not in ["A", "B", "C", "D", "E", "NULA"]:
-                alt = "NULA"
-            respostas[str(q)] = alt
-        novo_resumo = comparar_respostas(gabarito, respostas)
-        dados["gabarito_aluno_extraido"] = respostas
-        dados["resultado"] = novo_resumo
-        dados.setdefault("processamento", {})["revisao_manual"] = {
-            "revisado_em": agora_str(),
-            "observacao": request.form.get("observacao", "").strip(),
-        }
-        conn = conectar()
-        try:
-            conn.execute(
-                """
-                UPDATE resultados
-                SET nota_percentual = ?, resultado_json = ?, status_confianca = 'revisado_manual', revisado_em = ?, observacao_revisao = ?
-                WHERE id = ? AND professor_id = ?
-                """,
-                (novo_resumo["nota_percentual"], json.dumps(dados, ensure_ascii=False), agora_str(), request.form.get("observacao", "").strip(), int(resultado_id), int(professor_atual_id())),
-            )
-            conn.commit()
-        finally:
-            conn.close()
-        flash("Resultado revisado e nota recalculada.", "success")
-        return redirect(url_for("ver_resultado_detalhado", resultado_id=resultado_id))
-
-    return render_template("revisar_resultado.html", resultado=resultado, dados=dados, gabarito=gabarito)
-
-
-def diagnosticar_avaliacao(dados):
-    diagnosticos = []
-    for q in dados.get("questoes", []) or []:
-        numero = q.get("numero")
-        alts = q.get("alternativas", {}) if isinstance(q.get("alternativas"), dict) else {}
-        if len(str(q.get("enunciado", "")).strip()) < 20:
-            diagnosticos.append({"questao": numero, "tipo": "Enunciado curto", "mensagem": "Pode ficar pouco claro para o aluno."})
-        vazias = [a for a in ["A", "B", "C", "D", "E"] if not str(alts.get(a, "")).strip()]
-        if vazias:
-            diagnosticos.append({"questao": numero, "tipo": "Alternativa vazia", "mensagem": "Faltam alternativas: " + ", ".join(vazias)})
-        textos = [normalizar_texto_busca(alts.get(a, "")) for a in ["A", "B", "C", "D", "E"]]
-        if len([t for t in textos if t]) != len(set([t for t in textos if t])):
-            diagnosticos.append({"questao": numero, "tipo": "Alternativas repetidas", "mensagem": "Existem alternativas iguais ou muito parecidas."})
-        if str(q.get("correta", "")).upper()[:1] not in ["A", "B", "C", "D", "E"]:
-            diagnosticos.append({"questao": numero, "tipo": "Gabarito inválido", "mensagem": "A alternativa correta precisa ser A, B, C, D ou E."})
-        if not str(q.get("explicacao", "")).strip():
-            diagnosticos.append({"questao": numero, "tipo": "Sem explicação", "mensagem": "Adicionar explicação ajuda na devolutiva e relatório."})
-        if not isinstance(q.get("elemento_visual"), dict) or not q.get("elemento_visual"):
-            diagnosticos.append({"questao": numero, "tipo": "Sem elemento visual", "mensagem": "Questões mais completas podem usar tabela, gráfico, esquema ou diagrama."})
-        if not isinstance(q.get("resolucao"), list) or not q.get("resolucao"):
-            diagnosticos.append({"questao": numero, "tipo": "Sem resolução", "mensagem": "O gabarito do professor fica melhor com resolução passo a passo."})
-        if not isinstance(q.get("dados_calculo"), dict) or not q.get("dados_calculo"):
-            diagnosticos.append({"questao": numero, "tipo": "Sem dados de cálculo", "mensagem": "Quando fizer sentido, adicione fórmula, valores e unidade para questão calculável."})
-    return diagnosticos
-
-
-@app.route("/avaliacao/<int:avaliacao_id>/melhorar", methods=["GET", "POST"])
-def melhorar_avaliacao(avaliacao_id):
-    avaliacao = carregar_avaliacao(avaliacao_id)
-    if not avaliacao:
-        flash("Avaliação não encontrada.", "warning")
-        return redirect(url_for("home"))
-    dados = montar_dados_avaliacao(avaliacao)
-    if request.method == "POST":
-        questoes = []
-        gabarito = {}
-        for q in dados["questoes"]:
-            item = dict(q)
-            numero = int(item.get("numero") or len(questoes) + 1)
-            fallback_rico = _criar_questao_fallback(numero, dados.get("titulo", "Avaliação"), dados.get("materias", "Conhecimentos gerais"), dados.get("temas", ""))
-            item["enunciado"] = re.sub(r"\s+", " ", str(item.get("enunciado", "")).strip())
-            item["contexto"] = re.sub(r"\s+", " ", str(item.get("contexto", "")).strip())
-            if len(item["contexto"]) < 35:
-                item["contexto"] = fallback_rico.get("contexto", item["contexto"])
-            if len(item["enunciado"]) < 25:
-                item["enunciado"] = fallback_rico.get("enunciado", item["enunciado"])
-            if not isinstance(item.get("elemento_visual"), dict) or not item.get("elemento_visual"):
-                item["elemento_visual"] = fallback_rico.get("elemento_visual", {})
-            if not isinstance(item.get("dados_calculo"), dict) or not item.get("dados_calculo"):
-                item["dados_calculo"] = fallback_rico.get("dados_calculo", {})
-            if not isinstance(item.get("resolucao"), list) or not item.get("resolucao"):
-                item["resolucao"] = fallback_rico.get("resolucao", [])
-            item["tipo_questao"] = item.get("tipo_questao") or fallback_rico.get("tipo_questao", "mista")
-            item["dificuldade"] = item.get("dificuldade") or fallback_rico.get("dificuldade", "medio")
-            item["competencia"] = item.get("competencia") or fallback_rico.get("competencia", "")
-            item["explicacao"] = str(item.get("explicacao") or fallback_rico.get("explicacao") or f"A alternativa {item.get('correta', 'A')} é a resposta indicada no gabarito oficial.").strip()
-            alts = item.get("alternativas", {}) if isinstance(item.get("alternativas"), dict) else {}
-            item["alternativas"] = {a: re.sub(r"\s+", " ", str(alts.get(a, "")).strip()) or fallback_rico.get("alternativas", {}).get(a, "") for a in ["A", "B", "C", "D", "E"]}
-            correta = str(item.get("correta", "A")).upper()[:1]
-            if correta not in ["A", "B", "C", "D", "E"]:
-                correta = "A"
-            item["correta"] = correta
-            questoes.append(item)
-            gabarito[str(item.get("numero"))] = correta
-        conn = conectar()
-        try:
-            conn.execute(
-                """
-                UPDATE avaliacoes
-                SET questoes_json = ?, gabarito_json = ?, status_revisao = 'melhorada', atualizado_em = ?
-                WHERE id = ? AND professor_id = ?
-                """,
-                (json.dumps(questoes, ensure_ascii=False), json.dumps(gabarito, ensure_ascii=False), agora_str(), int(avaliacao_id), int(professor_atual_id())),
-            )
-            conn.commit()
-        finally:
-            conn.close()
-        flash("Melhorias aplicadas: textos normalizados, questões enriquecidas com visual/cálculo quando faltava, resoluções preenchidas e gabarito validado.", "success")
-        return redirect(url_for("ver_avaliacao", avaliacao_id=avaliacao_id))
-    diagnosticos = diagnosticar_avaliacao(dados)
-    return render_template("melhorar_avaliacao.html", avaliacao=dados, diagnosticos=diagnosticos)
-
-
-@app.route("/avaliacao/<int:avaliacao_id>/exportar-diario.csv")
-def exportar_diario_classe(avaliacao_id):
-    rel = calcular_relatorio_avaliacao(avaliacao_id)
-    if not rel:
-        flash("Avaliação não encontrada.", "warning")
-        return redirect(url_for("home"))
-    output = io.StringIO()
-    writer = csv.writer(output, delimiter=";")
-    writer.writerow(["Matricula", "Nome", "Turma", "Nota Final", "Status"])
-    for item in rel["alunos_resultados"]:
-        linha = item["linha"]
-        writer.writerow([linha["matricula"], linha["aluno_nome"], linha["turma"], str(linha["nota_percentual"]).replace(".", ","), "Corrigido"])
-    resp = Response(output.getvalue(), mimetype="text/csv; charset=utf-8")
-    resp.headers["Content-Disposition"] = f"attachment; filename=diario_avaliacao_{avaliacao_id}.csv"
-    return resp
-
-
 @app.route("/corrigir", methods=["POST"])
 def corrigir():
-    """Corrige folhas por upload sem usar fallback perigoso.
-
-    QR não lido/inválido vira pendência de identificação assistida.
-    O Atlas só salva nota quando sabe exatamente qual folha/prova/aluno é.
     """
-    try:
-        prova_base_id = int(request.form.get("prova_id") or 0)
-    except Exception:
-        prova_base_id = 0
+    Corrige uma ou várias folhas.
+
+    Importante: a prova correta vem do QR Code da própria folha.
+    O QR Code é obrigatório para salvar automaticamente.
+    Se o QR falhar, a folha não é salva em aluno/prova base.
+    """
+    prova_base_id = int(request.form["prova_id"])
     arquivos = request.files.getlist("folhas")
 
     if not arquivos:
@@ -2639,19 +1960,22 @@ def corrigir():
         return redirect(url_for("home"))
 
     conn = conectar()
-    prova_base = buscar_prova_com_aluno(conn, prova_base_id) if prova_base_id else None
+    prova_base = conn.execute(
+        "SELECT * FROM provas WHERE id = ? AND professor_id = ?", (prova_base_id, int(professor_atual_id()))
+    ).fetchone()
+
     if not prova_base:
         conn.close()
-        flash("Selecione uma prova base válida. Ela será usada apenas para sugerir turma na identificação assistida.", "danger")
+        flash("Prova base não encontrada.", "danger")
         return redirect(url_for("home"))
 
     total_corrigidas = 0
-    pendentes = 0
     avisos = []
 
     for arquivo in arquivos:
         if arquivo.filename == "":
             continue
+
         try:
             imagens_para_corrigir = preparar_arquivos_para_correcao(arquivo)
         except Exception as erro:
@@ -2660,44 +1984,63 @@ def corrigir():
 
         for caminho in imagens_para_corrigir:
             dados_qr = ler_qrcode(str(caminho))
-            if not dados_qr or not dados_qr.get("prova_id"):
-                registrar_identificacao_pendente(conn, caminho, origem="upload", prova_base_id=prova_base_id, mensagem=f"QR não lido em {arquivo.filename}.", dados_qr=dados_qr)
-                pendentes += 1
+
+            # REGRA DE SEGURANÇA: não corrigir upload por prova base quando o QR falhar.
+            # Isso evita nota no aluno errado.
+            if not dados_qr or not dados_qr.get("prova_id") or not dados_qr.get("aluno_id"):
+                pendencia_id = salvar_pendencia_identificacao(
+                    conn,
+                    caminho,
+                    origem="upload",
+                    mensagem=f"QR Code não lido no arquivo {arquivo.filename}.",
+                )
+                avisos.append(
+                    f"Não consegui ler o QR de {arquivo.filename}. A folha foi enviada para Identificação Manual #{pendencia_id} e NÃO foi salva em aluno errado."
+                )
                 continue
 
-            prova_corrigir = buscar_prova_com_aluno(conn, int(dados_qr["prova_id"]))
-            ok_qr, msg_qr = validar_qr_folha(dados_qr, prova_corrigir)
-            if not ok_qr:
-                registrar_identificacao_pendente(conn, caminho, origem="upload", prova_base_id=prova_base_id, mensagem=f"{msg_qr} Arquivo: {arquivo.filename}.", dados_qr=dados_qr)
-                pendentes += 1
+            prova_corrigir = conn.execute(
+                "SELECT * FROM provas WHERE id = ? AND professor_id = ?",
+                (int(dados_qr["prova_id"]), int(professor_atual_id()))
+            ).fetchone()
+
+            if not prova_corrigir:
+                avisos.append(
+                    f"QR de {arquivo.filename} apontou para uma prova inexistente ou de outro professor. A folha NÃO foi salva."
+                )
                 continue
 
             gabarito_oficial = json.loads(prova_corrigir["gabarito_json"])
+
             try:
                 resultado = corrigir_imagem_web(
                     caminho_gabarito_aluno=str(caminho),
                     gabarito_oficial=gabarito_oficial,
-                    usar_ia="auto",
                 )
             except Exception as erro:
                 avisos.append(f"Erro ao corrigir {arquivo.filename}: {erro}")
                 continue
 
-            resultado["dados_qr"] = dados_qr
-            resultado.setdefault("processamento", {})["validacao_qr"] = msg_qr
-            if "mapa_questoes_json" in prova_corrigir.keys():
-                resultado["mapa_questoes"] = carregar_json_seguro(prova_corrigir["mapa_questoes_json"], {})
-            nota = float(resultado["resultado"]["nota_percentual"])
-            status_conf = "confiavel" if resultado["resultado"].get("anuladas_ou_em_branco", 0) == 0 else "revisao"
+            # Mantém o QR pré-lido no resultado para facilitar debug, mesmo quando o corretor não reler o QR.
+            if dados_qr and not resultado.get("dados_qr"):
+                resultado["dados_qr"] = dados_qr
+
+            aluno_id = int(dados_qr["aluno_id"])
+            nota = resultado["resultado"]["nota_percentual"]
 
             conn.execute(
                 """
                 INSERT INTO resultados (professor_id, aluno_id, prova_id, nota_percentual, resultado_json, status_confianca, criado_em)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
+            """,
                 (
-                    int(professor_atual_id()), int(prova_corrigir["aluno_id"]), int(prova_corrigir["id"]),
-                    nota, json.dumps(resultado, ensure_ascii=False), status_conf, agora_str(),
+                    int(professor_atual_id()),
+                    aluno_id,
+                    prova_corrigir["id"],
+                    nota,
+                    json.dumps(resultado, ensure_ascii=False),
+                    "confiavel" if resultado["resultado"].get("anuladas_ou_em_branco", 0) == 0 else "revisao",
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 ),
             )
             total_corrigidas += 1
@@ -2707,20 +2050,183 @@ def corrigir():
 
     if total_corrigidas:
         flash(f"Correção finalizada. {total_corrigidas} folha(s) corrigida(s).", "success")
-    if pendentes:
-        flash(f"{pendentes} folha(s) ficaram aguardando identificação assistida porque o QR falhou ou estava inválido.", "warning")
-    if not total_corrigidas and not pendentes:
+    else:
         flash("Nenhuma folha válida foi enviada.", "warning")
+
     for aviso in avisos[:5]:
         flash(aviso, "warning")
+
     if len(avisos) > 5:
         flash(f"Mais {len(avisos) - 5} aviso(s) ocultado(s).", "warning")
 
-    if pendentes and not total_corrigidas:
-        return redirect(url_for("identificacoes_pendentes"))
     return redirect(url_for("home"))
 
 
+def salvar_pendencia_identificacao(conn, caminho_arquivo, origem="upload", mensagem="QR Code não lido."):
+    """Salva uma folha sem QR para identificação manual posterior."""
+    cursor = conn.execute(
+        """
+        INSERT INTO identificacoes_pendentes
+            (professor_id, caminho_arquivo, origem, mensagem, resolvido, criado_em)
+        VALUES (?, ?, ?, ?, 0, ?)
+        """,
+        (
+            int(professor_atual_id()),
+            str(caminho_arquivo),
+            origem,
+            mensagem,
+            agora_str(),
+        ),
+    )
+    return int(cursor.lastrowid)
+
+
+@app.route("/identificacoes-pendentes")
+def identificacoes_pendentes():
+    conn = conectar()
+    try:
+        pendentes = conn.execute(
+            """
+            SELECT * FROM identificacoes_pendentes
+            WHERE professor_id = ? AND resolvido = 0
+            ORDER BY id DESC
+            """,
+            (int(professor_atual_id()),),
+        ).fetchall()
+        resolvidas = conn.execute(
+            """
+            SELECT * FROM identificacoes_pendentes
+            WHERE professor_id = ? AND resolvido = 1
+            ORDER BY id DESC
+            LIMIT 20
+            """,
+            (int(professor_atual_id()),),
+        ).fetchall()
+    finally:
+        conn.close()
+    return render_template("identificacoes_pendentes.html", pendentes=pendentes, resolvidas=resolvidas)
+
+
+@app.route("/identificacao/<int:pendencia_id>/arquivo")
+def arquivo_identificacao_pendente(pendencia_id):
+    conn = conectar()
+    try:
+        pendencia = conn.execute(
+            "SELECT * FROM identificacoes_pendentes WHERE id = ? AND professor_id = ?",
+            (int(pendencia_id), int(professor_atual_id())),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if not pendencia:
+        flash("Pendência não encontrada.", "warning")
+        return redirect(url_for("identificacoes_pendentes"))
+
+    caminho = Path(pendencia["caminho_arquivo"])
+    if not caminho.exists():
+        flash("Arquivo temporário da folha não existe mais. Envie a folha novamente.", "warning")
+        return redirect(url_for("identificacoes_pendentes"))
+
+    return send_file(caminho)
+
+
+@app.route("/identificacao/<int:pendencia_id>/resolver", methods=["GET", "POST"])
+def resolver_identificacao_pendente(pendencia_id):
+    conn = conectar()
+    try:
+        pendencia = conn.execute(
+            "SELECT * FROM identificacoes_pendentes WHERE id = ? AND professor_id = ?",
+            (int(pendencia_id), int(professor_atual_id())),
+        ).fetchone()
+
+        if not pendencia:
+            flash("Pendência não encontrada.", "warning")
+            return redirect(url_for("identificacoes_pendentes"))
+
+        provas = conn.execute(
+            """
+            SELECT provas.*, alunos.nome AS aluno_nome, alunos.matricula, alunos.turma
+            FROM provas
+            JOIN alunos ON alunos.id = provas.aluno_id
+            WHERE provas.professor_id = ?
+            ORDER BY provas.id DESC
+            """,
+            (int(professor_atual_id()),),
+        ).fetchall()
+
+        if request.method == "POST":
+            prova_id = int(request.form.get("prova_id") or 0)
+            prova = conn.execute(
+                """
+                SELECT provas.*, alunos.nome AS aluno_nome, alunos.matricula, alunos.turma
+                FROM provas
+                JOIN alunos ON alunos.id = provas.aluno_id
+                WHERE provas.id = ? AND provas.professor_id = ?
+                """,
+                (prova_id, int(professor_atual_id())),
+            ).fetchone()
+
+            if not prova:
+                flash("Folha/prova selecionada não encontrada.", "danger")
+                return redirect(url_for("resolver_identificacao_pendente", pendencia_id=pendencia_id))
+
+            caminho = Path(pendencia["caminho_arquivo"])
+            if not caminho.exists():
+                flash("Arquivo temporário da folha não existe mais. Envie a folha novamente.", "warning")
+                return redirect(url_for("identificacoes_pendentes"))
+
+            gabarito_oficial = json.loads(prova["gabarito_json"])
+            resultado = corrigir_imagem_web(
+                caminho_gabarito_aluno=str(caminho),
+                gabarito_oficial=gabarito_oficial,
+                usar_ia="auto",  # rollback seletivo: depois da identificação manual, usa o comportamento antigo tolerante quando o OMR falhar
+            )
+            resultado["dados_qr"] = {
+                "modo": "identificacao_manual",
+                "aluno_id": int(prova["aluno_id"]),
+                "prova_id": int(prova["id"]),
+                "nome": prova["aluno_nome"],
+                "matricula": prova["matricula"],
+                "turma": prova["turma"],
+            }
+            resultado.setdefault("processamento", {})["identificacao_manual"] = {
+                "pendencia_id": int(pendencia_id),
+                "confirmado_em": agora_str(),
+            }
+
+            nota = float(resultado["resultado"]["nota_percentual"])
+            cursor = conn.execute(
+                """
+                INSERT INTO resultados
+                    (professor_id, aluno_id, prova_id, nota_percentual, resultado_json, status_confianca, criado_em)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    int(professor_atual_id()),
+                    int(prova["aluno_id"]),
+                    int(prova["id"]),
+                    nota,
+                    json.dumps(resultado, ensure_ascii=False),
+                    "revisao_manual_qr",
+                    agora_str(),
+                ),
+            )
+            resultado_id = int(cursor.lastrowid)
+            conn.execute(
+                """
+                UPDATE identificacoes_pendentes
+                SET resolvido = 1, resultado_id = ?, resolvido_em = ?
+                WHERE id = ? AND professor_id = ?
+                """,
+                (resultado_id, agora_str(), int(pendencia_id), int(professor_atual_id())),
+            )
+            conn.commit()
+            flash("Folha identificada manualmente e corrigida.", "success")
+            return redirect(url_for("ver_resultado_detalhado", resultado_id=resultado_id))
+
+        return render_template("resolver_identificacao.html", pendencia=pendencia, provas=provas)
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":

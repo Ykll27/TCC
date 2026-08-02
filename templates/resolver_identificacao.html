@@ -1,28 +1,44 @@
 {% extends "base.html" %}
-{% block title %}Atlas - Resolver identificação{% endblock %}
+{% block title %}Atlas - Resolver Identificação{% endblock %}
 {% block content %}
-<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
-    <div><h1 class="atlas-title">Resolver identificação #{{ pendente.id }}</h1><p class="atlas-subtitle mb-0">Confirme manualmente de quem é a folha antes de salvar a nota.</p></div>
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+    <div>
+        <h1 class="atlas-title mb-1">Resolver identificação #{{ pendencia.id }}</h1>
+        <p class="atlas-subtitle mb-0">Escolha manualmente qual folha/aluno corresponde à imagem sem QR.</p>
+    </div>
     <a class="btn btn-outline-secondary" href="{{ url_for('identificacoes_pendentes') }}">Voltar</a>
 </div>
+
 <div class="row g-4">
-    <div class="col-lg-7"><div class="card atlas-card"><div class="card-body p-4">
-        <h2 class="atlas-title h5">Imagem recebida</h2>
-        <p class="small-muted">{{ pendente.mensagem }}</p>
-        <img class="img-fluid rounded border" src="{{ url_for('ver_upload', nome=pendente.imagem_arquivo) }}" alt="Folha pendente">
-    </div></div></div>
-    <div class="col-lg-5"><div class="card atlas-card"><div class="card-body p-4">
-        <h2 class="atlas-title h5">Escolha a folha correta</h2>
-        {% if sugestoes %}<div class="alert alert-light border"><strong>Sugestões de alunos da turma:</strong><br>{% for s in sugestoes[:5] %}<span class="badge text-bg-light border me-1 mb-1">{{ s.nome }} · {{ s.score }}%</span>{% endfor %}</div>{% endif %}
-        <form method="POST">
-            <label class="form-label">Folha/prova do aluno</label>
-            <select class="form-select" name="prova_id" required>
-                <option value="">Selecione...</option>
-                {% for p in provas %}<option value="{{ p.id }}">#{{ p.id }} - {{ p.aluno_nome }} - {{ p.turma }} - {{ p.titulo }}</option>{% endfor %}
-            </select>
-            <div class="form-text mb-3">O Atlas vai corrigir a imagem usando o gabarito dessa folha. Use com cuidado.</div>
-            <button class="btn btn-warning" type="submit">Confirmar e corrigir</button>
-        </form>
-    </div></div></div>
+    <div class="col-lg-7">
+        <div class="card atlas-card">
+            <div class="card-body p-4">
+                <h2 class="atlas-title h4">Prévia da folha</h2>
+                <div class="border rounded-4 bg-light p-2 text-center">
+                    <img src="{{ url_for('arquivo_identificacao_pendente', pendencia_id=pendencia.id) }}" class="img-fluid rounded" alt="Folha pendente" />
+                </div>
+                <p class="small-muted mt-3 mb-0">{{ pendencia.mensagem }}</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-5">
+        <div class="card atlas-card">
+            <div class="card-body p-4">
+                <h2 class="atlas-title h4">Confirmar aluno/prova</h2>
+                <form method="POST" class="d-grid gap-3">
+                    <div>
+                        <label class="form-label">Folha correta</label>
+                        <select name="prova_id" class="form-select" required>
+                            {% for prova in provas %}
+                            <option value="{{ prova.id }}">#{{ prova.id }} - {{ prova.titulo }} - {{ prova.aluno_nome }} - {{ prova.turma }}</option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">O Atlas usará o gabarito dessa folha e salvará o resultado no aluno selecionado.</div>
+                    </div>
+                    <button class="btn btn-atlas" type="submit">Confirmar e corrigir</button>
+                </form>
+            </div>
+        </div>
+    </div>
 </div>
 {% endblock %}

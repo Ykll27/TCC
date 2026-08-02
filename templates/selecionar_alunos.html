@@ -16,13 +16,6 @@
             <div class="table-responsive" style="max-height:430px;overflow:auto"><table class="table table-sm align-middle"><thead><tr><th></th><th>Nome</th><th>Matrícula</th><th>Turma</th></tr></thead><tbody>{% for aluno in alunos %}<tr><td><input class="form-check-input aluno-check" type="checkbox" name="aluno_ids" value="{{ aluno.id }}"></td><td>{{ aluno.nome }}</td><td>{{ aluno.matricula }}</td><td>{{ aluno.turma }}</td></tr>{% else %}<tr><td colspan="4" class="text-muted">Cadastre alunos primeiro.</td></tr>{% endfor %}</tbody></table></div>
         </div>
     </div>
-    <div class="alert alert-light border mt-4">
-        <div class="form-check">
-            <input class="form-check-input" type="checkbox" name="embaralhar_questoes" id="embaralharQuestoes" checked>
-            <label class="form-check-label" for="embaralharQuestoes"><strong>Embaralhar questões por aluno</strong></label>
-        </div>
-        <div class="small-muted">Cada aluno recebe uma ordem diferente das questões. O Atlas salva o mapa da folha e corrige automaticamente pelo gabarito daquela versão.</div>
-    </div>
     <div class="mt-4 d-flex gap-2"><button class="btn btn-success" type="submit">Gerar folhas personalizadas</button><a class="btn btn-outline-secondary" href="{{ url_for('home') }}">Voltar</a></div>
 </div></form>
 {% endblock %}

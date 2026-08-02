@@ -30,10 +30,10 @@
             }
 
             .anchor {
-                width: 18px;
-                height: 18px;
+                width: 16px;
+                height: 16px;
                 background: #000;
-                border-radius: 50%;
+                border-radius: 2px;
                 position: absolute;
             }
             .a1 {
@@ -58,7 +58,7 @@
                 border-radius: 10px;
                 padding: 8px;
                 display: grid;
-                grid-template-columns: 1fr 38mm;
+                grid-template-columns: 1fr 48mm;
                 gap: 8px;
                 margin-bottom: 10px;
             }
@@ -89,8 +89,9 @@
                 padding-left: 6px;
             }
             .qr-area img {
-                width: 80px;
-                height: 80px;
+                width: 120px;
+                height: 120px;
+                image-rendering: pixelated;
             }
             .meta {
                 font-size: 10px;
@@ -116,12 +117,31 @@
             .qrow {
                 white-space: nowrap;
                 font-size: 14px;
-                margin-bottom: 5px;
+                margin-bottom: 7px;
+                display: flex;
+                align-items: flex-end;
+                gap: 6px;
             }
             .qnum {
                 display: inline-block;
-                width: 26px;
+                width: 28px;
                 font-weight: 700;
+                padding-bottom: 1px;
+            }
+
+            .bubble-wrap {
+                display: inline-flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: flex-end;
+                gap: 1px;
+                width: 20px;
+            }
+
+            .bubble-label {
+                font-size: 8px;
+                font-weight: 700;
+                line-height: 8px;
             }
 
             .bubble {
@@ -130,11 +150,7 @@
                 height: 18px;
                 border: 2px solid #111;
                 border-radius: 50%;
-                text-align: center;
-                line-height: 14px;
-                font-size: 11px;
-                margin-left: 3px;
-                font-weight: 700;
+                background: #fff;
             }
 
             .instructions {
@@ -201,11 +217,11 @@
                     if q <= prova.total_questoes %}
                     <div class="qrow">
                         <span class="qnum">{{ "%02d"|format(q) }}</span>
-                        <span class="bubble">A</span>
-                        <span class="bubble">B</span>
-                        <span class="bubble">C</span>
-                        <span class="bubble">D</span>
-                        <span class="bubble">E</span>
+                        <span class="bubble-wrap"><span class="bubble-label">A</span><span class="bubble"></span></span>
+                        <span class="bubble-wrap"><span class="bubble-label">B</span><span class="bubble"></span></span>
+                        <span class="bubble-wrap"><span class="bubble-label">C</span><span class="bubble"></span></span>
+                        <span class="bubble-wrap"><span class="bubble-label">D</span><span class="bubble"></span></span>
+                        <span class="bubble-wrap"><span class="bubble-label">E</span><span class="bubble"></span></span>
                     </div>
                     {% endif %} {% endfor %}
                 </div>

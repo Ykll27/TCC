@@ -1,14 +1,58 @@
 {% extends "base.html" %}
-{% block title %}Atlas - Identificação assistida{% endblock %}
+{% block title %}Atlas - Identificação Manual{% endblock %}
 {% block content %}
-<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
-    <div><h1 class="atlas-title">Identificação assistida</h1><p class="atlas-subtitle mb-0">Folhas que não puderam ser salvas automaticamente porque o QR falhou ou estava inválido.</p></div>
-    <a class="btn btn-atlas" href="{{ url_for('scan_tempo_real') }}">Voltar ao Scan</a>
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+    <div>
+        <h1 class="atlas-title mb-1">Identificação Manual</h1>
+        <p class="atlas-subtitle mb-0">Folhas que não tiveram QR Code lido ficam aqui para conferência do professor.</p>
+    </div>
+    <a class="btn btn-outline-primary" href="{{ url_for('home') }}">Voltar</a>
 </div>
-<div class="card atlas-card"><div class="card-body p-4">
-    <div class="table-responsive"><table class="table table-hover align-middle">
-        <thead><tr><th>ID</th><th>Origem</th><th>Prova base</th><th>Mensagem</th><th>Data</th><th></th></tr></thead>
-        <tbody>{% for p in pendentes %}<tr><td>#{{ p.id }}</td><td>{{ p.origem }}</td><td>{{ p.prova_base_titulo or '-' }}</td><td>{{ p.mensagem }}</td><td>{{ p.criado_em }}</td><td><a class="btn btn-sm btn-outline-warning" href="{{ url_for('resolver_identificacao_pendente', pendente_id=p.id) }}">Resolver</a></td></tr>{% else %}<tr><td colspan="6" class="text-muted">Nenhuma pendência de identificação.</td></tr>{% endfor %}</tbody>
-    </table></div>
-</div></div>
+
+<div class="card atlas-card mb-4">
+    <div class="card-body p-4">
+        <h2 class="atlas-title h4">Pendentes</h2>
+        <div class="table-responsive">
+            <table class="table align-middle">
+                <thead><tr><th>ID</th><th>Origem</th><th>Mensagem</th><th>Data</th><th></th></tr></thead>
+                <tbody>
+                {% for p in pendentes %}
+                <tr>
+                    <td>#{{ p.id }}</td>
+                    <td>{{ p.origem }}</td>
+                    <td>{{ p.mensagem }}</td>
+                    <td>{{ p.criado_em }}</td>
+                    <td class="text-end"><a class="btn btn-sm btn-atlas" href="{{ url_for('resolver_identificacao_pendente', pendencia_id=p.id) }}">Resolver</a></td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5" class="text-muted">Nenhuma folha pendente.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="card atlas-card">
+    <div class="card-body p-4">
+        <h2 class="atlas-title h4">Resolvidas recentemente</h2>
+        <div class="table-responsive">
+            <table class="table table-sm align-middle">
+                <thead><tr><th>ID</th><th>Origem</th><th>Resultado</th><th>Resolvida em</th></tr></thead>
+                <tbody>
+                {% for p in resolvidas %}
+                <tr>
+                    <td>#{{ p.id }}</td>
+                    <td>{{ p.origem }}</td>
+                    <td>{% if p.resultado_id %}<a href="{{ url_for('ver_resultado_detalhado', resultado_id=p.resultado_id) }}">Resultado #{{ p.resultado_id }}</a>{% else %}-{% endif %}</td>
+                    <td>{{ p.resolvido_em or '-' }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="4" class="text-muted">Nenhuma resolução recente.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
 {% endblock %}
