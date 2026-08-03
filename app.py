@@ -1620,6 +1620,10 @@ def processar_frame_scan_rota():
         return jsonify({"ok": False, "status": "erro", "mensagem": "Sessão ou prova inválida."}), 400
 
     imagem_data_url = dados.get("imagem")
+    # Quando true, o professor pediu explicitamente para mandar o frame atual
+    # para a Identificação Manual. No loop automático normal, QR falhou NÃO
+    # deve criar pendência infinita no banco.
+    forcar_pendencia = str(dados.get("forcar_pendencia") or "").lower() in ["1", "true", "sim", "yes"]
     inicio = time.perf_counter()
 
     try:
@@ -1643,19 +1647,41 @@ def processar_frame_scan_rota():
         # Isso impede o bug de registrar a nota no aluno da prova base.
         if not dados_qr or not dados_qr.get("prova_id") or not dados_qr.get("aluno_id"):
             latencia_ms = round((time.perf_counter() - inicio) * 1000, 2)
+
+            # No loop automático, NÃO salvamos uma pendência a cada frame.
+            # Isso corrigia o problema de "análise infinita" gerando várias
+            # entradas repetidas no banco e deixando o Scan preso.
+            if not forcar_pendencia:
+                try:
+                    Path(caminho).unlink(missing_ok=True)
+                except Exception:
+                    pass
+                return jsonify({
+                    "ok": False,
+                    "status": "buscando_qr",
+                    "mensagem": "QR Code ainda não lido. Ajuste distância, foco e iluminação.",
+                    "salvou_pendencia": False,
+                    "auto_continuar": True,
+                    "latencia_ms": latencia_ms,
+                    "resumo": recalcular_sessao_scan(conn, sessao_id),
+                }), 200
+
+            # Só cai aqui quando o professor clicar em Identificação Manual.
             pendencia_id = salvar_pendencia_identificacao(
                 conn,
                 caminho,
                 origem="scan",
-                mensagem="QR Code não lido durante o Scan.",
+                mensagem="QR Code não lido durante o Scan. Identificação manual solicitada pelo professor.",
             )
             conn.commit()
             return jsonify({
                 "ok": False,
-                "status": "qr_nao_lido",
-                "mensagem": "QR Code não lido. A folha foi enviada para Identificação Manual e nada foi salvo em aluno errado.",
+                "status": "qr_nao_lido_pendente",
+                "mensagem": "QR Code não lido. Frame enviado para Identificação Manual. Nada foi salvo em aluno errado.",
+                "salvou_pendencia": True,
                 "pendencia_id": pendencia_id,
                 "pendencia_url": url_for("resolver_identificacao_pendente", pendencia_id=pendencia_id),
+                "auto_continuar": False,
                 "latencia_ms": latencia_ms,
                 "resumo": recalcular_sessao_scan(conn, sessao_id),
             }), 200
