@@ -90,13 +90,15 @@ def _normalizar_payload_qr(payload: str) -> Optional[Dict[str, Any]]:
         "mat": "matricula",
         "t": "turma",
         "sig": "assinatura",
+        "f": "folha_codigo",
+        "fid": "folha_codigo",
     }
     for curto, completo in aliases.items():
         if completo not in normalizado and curto in normalizado:
             normalizado[completo] = normalizado.get(curto)
 
     # Garante strings/inteiros limpos onde importa.
-    for chave in ["aluno_id", "prova_id", "matricula", "nome", "turma", "titulo", "disciplina", "assinatura"]:
+    for chave in ["aluno_id", "prova_id", "matricula", "nome", "turma", "titulo", "disciplina", "assinatura", "folha_codigo"]:
         if normalizado.get(chave) is None:
             normalizado[chave] = ""
 
@@ -486,10 +488,18 @@ def _mapear_grupos_para_questoes(
     colunas = [sorted(coluna, key=lambda g: g["cy"]) for coluna in colunas]
     colunas = sorted(colunas, key=lambda coluna: np.mean([g["cx"] for g in coluna]))
 
+    # Modelo V1 de impressão: geralmente usa duas colunas balanceadas
+    # (ex.: 1-3 na esquerda e 4-5 na direita).
+    # Modelo antigo: usava colunas fixas de 10 questões.
+    if len(colunas) == 2:
+        questoes_por_coluna = int(np.ceil(total_questoes / 2.0))
+    else:
+        questoes_por_coluna = QUESTOES_POR_COLUNA
+
     mapa = {}
     for indice_coluna, coluna in enumerate(colunas):
         for indice_linha, grupo in enumerate(coluna):
-            questao = indice_coluna * QUESTOES_POR_COLUNA + indice_linha + 1
+            questao = indice_coluna * questoes_por_coluna + indice_linha + 1
             if questao <= total_questoes:
                 mapa[str(questao)] = grupo["bolhas"]
 

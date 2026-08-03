@@ -81,25 +81,25 @@ def garantir_banco_atualizado():
     return None
 
 
-def gerar_qr(aluno, prova_id, titulo, disciplina):
-    """
-    Gera QR Code mais fácil de ler pela câmera.
+def gerar_qr(aluno, prova_id, titulo, disciplina, folha_codigo=None):
+    """Gera QR Code compacto e fácil de ler.
 
-    Correção aplicada:
-    - payload compacto, em vez de JSON grande com título/nome completo;
-    - error correction alto;
-    - borda maior;
-    - imagem maior e mais nítida.
-
-    O restante dos dados é buscado no banco usando prova_id + aluno_id.
+    O modelo V1 de impressão usa também um identificador textual no rodapé
+    (ex.: FLH-260801-ABC123). Esse mesmo código vai no QR para permitir
+    validação cruzada e recuperação manual quando necessário.
     """
     aluno_id = int(aluno["id"])
     professor_id = int(professor_atual_id() or 0)
-    assinatura = hashlib.sha256(f"atlas:{professor_id}:{aluno_id}:{prova_id}".encode("utf-8")).hexdigest()[:16]
+    folha_codigo = str(folha_codigo or gerar_codigo_folha(prova_id, aluno_id))
+    assinatura = hashlib.sha256(
+        f"atlas:{professor_id}:{aluno_id}:{prova_id}:{folha_codigo}".encode("utf-8")
+    ).hexdigest()[:16]
 
+    # Payload curto = QR mais limpo e mais legível por câmera.
     dados = {
-        "v": 3,
+        "v": 4,
         "s": "atlas",
+        "f": folha_codigo,
         "p": int(prova_id),
         "a": aluno_id,
         "m": str(aluno["matricula"] or ""),
@@ -160,6 +160,18 @@ def carregar_json_seguro(texto, padrao=None):
 
 def agora_str():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def gerar_codigo_folha(prova_id=None, aluno_id=None):
+    """Gera um identificador textual no padrão do novo modelo V1 de impressão.
+
+    O código aparece no rodapé da folha e também entra no QR.
+    Ele serve como plano B para identificação manual quando o QR não for lido.
+    """
+    data = datetime.now().strftime("%y%m%d")
+    base = f"{data}-{prova_id or uuid.uuid4().hex[:4]}-{aluno_id or uuid.uuid4().hex[:4]}-{uuid.uuid4().hex[:6]}"
+    resumo = hashlib.sha1(base.encode("utf-8")).hexdigest()[:6].upper()
+    return f"FLH-{data}-{resumo}"
 
 
 def normalizar_termos(texto: str):
@@ -976,92 +988,169 @@ def _texto_pdf(c, texto, x, y, largura, fonte="Helvetica", tamanho=10, entrelinh
 
 
 def gerar_pdf_prova(avaliacao, incluir_gabarito=False):
-    """Gera PDF pronto para impressão da prova ou do gabarito do professor."""
+    """Gera PDF no modelo visual V1 enviado pelo usuário.
+
+    O layout segue a referência atlas-teste-v1-impressao:
+    - cabeçalho limpo com marca Atlas;
+    - caixa V1 no canto superior direito;
+    - cards de disciplina/assunto/turma/data;
+    - prova com questões e alternativas;
+    - gabarito com cards das respostas e resoluções.
+    """
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import cm
     from reportlab.pdfgen import canvas
+    from reportlab.lib import colors
+    from reportlab.lib.utils import simpleSplit
 
     PDF_DIR = BASE_DIR / "static" / "pdfs"
     PDF_DIR.mkdir(parents=True, exist_ok=True)
 
     dados = montar_dados_avaliacao(avaliacao)
     sufixo = "gabarito" if incluir_gabarito else "prova"
-    caminho = PDF_DIR / f"avaliacao_{dados['id']}_{sufixo}.pdf"
+    caminho = PDF_DIR / f"avaliacao_{dados['id']}_{sufixo}_v1.pdf"
 
     c = canvas.Canvas(str(caminho), pagesize=A4)
-    largura_pagina, altura_pagina = A4
-    margem = 1.7 * cm
-    largura_texto = largura_pagina - (2 * margem)
-    y = altura_pagina - margem
+    W, H = A4
+    azul = colors.HexColor("#003c78")
+    texto = colors.HexColor("#0c2340")
+    muted = colors.HexColor("#5c6d86")
+    border = colors.HexColor("#c5d4e5")
+    fill = colors.HexColor("#f7fbff")
 
-    c.setTitle(f"{dados['titulo']} - {sufixo}")
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(margem, y, str(dados["titulo"])[:90])
-    y -= 18
-    c.setFont("Helvetica", 10)
-    c.drawString(margem, y, f"Matérias: {dados['materias']}")
-    y -= 14
-    c.drawString(margem, y, f"Temas: {dados.get('temas') or '-'}")
-    y -= 20
+    margem = 1.7 * cm
+    x0 = margem
+    y = H - 1.6 * cm
+
+    def draw_logo(x, y_top):
+        c.setStrokeColor(texto)
+        c.setLineWidth(1.2)
+        r = 13
+        c.circle(x + r, y_top - r, r)
+        c.ellipse(x + 5, y_top - 24, x + 21, y_top - 2)
+        c.ellipse(x + 2, y_top - 18, x + 24, y_top - 8)
+        c.line(x + r, y_top - 26, x + r - 7, y_top - 39)
+        c.line(x + r, y_top - 26, x + r + 9, y_top - 39)
+        c.line(x + 2, y_top - 39, x + 28, y_top - 39)
+
+    def draw_box(x, y_top, w, h, label, value, value_size=10):
+        c.setStrokeColor(border)
+        c.setFillColor(fill)
+        c.rect(x, y_top - h, w, h, stroke=1, fill=1)
+        c.setFillColor(muted)
+        c.setFont("Helvetica-Bold", 7.5)
+        c.drawString(x + 7, y_top - 14, str(label).upper())
+        c.setFillColor(texto)
+        c.setFont("Helvetica-Bold", value_size)
+        c.drawString(x + 7, y_top - 34, str(value or "-")[:38])
+
+    def draw_wrapped(texto_str, x, y_atual, largura, font="Helvetica", size=9.5, leading=12, min_y=45):
+        texto_str = str(texto_str or "").replace("\n", " ")
+        linhas = simpleSplit(texto_str, font, size, largura)
+        c.setFont(font, size)
+        c.setFillColor(texto)
+        for linha in linhas:
+            if y_atual < min_y:
+                c.showPage()
+                draw_header()
+                y_atual = H - 4.2 * cm
+                c.setFont(font, size)
+                c.setFillColor(texto)
+            c.drawString(x, y_atual, linha)
+            y_atual -= leading
+        return y_atual
+
+    def draw_header():
+        nonlocal y
+        y = H - 1.6 * cm
+        draw_logo(x0, y)
+        c.setFillColor(muted)
+        c.setFont("Helvetica-Bold", 8)
+        tipo = "GABARITO DO PROFESSOR" if incluir_gabarito else "PROVA"
+        c.drawString(x0 + 3.1 * cm, y - 12, tipo)
+        c.setFillColor(texto)
+        c.setFont("Helvetica-Bold", 22)
+        c.drawString(x0 + 3.1 * cm, y - 32, str(dados["titulo"])[:45])
+
+        c.setStrokeColor(colors.HexColor("#9fc2e6"))
+        c.setFillColor(colors.HexColor("#eaf4ff"))
+        c.rect(W - margem - 52, y - 34, 52, 34, stroke=1, fill=1)
+        c.setFillColor(azul)
+        c.setFont("Helvetica-Bold", 11)
+        c.drawCentredString(W - margem - 26, y - 21, "V1")
+
+        c.setStrokeColor(azul)
+        c.setLineWidth(2)
+        c.line(x0, y - 64, W - margem, y - 64)
+
+        y = y - 82
+        gap = 7
+        box_w = (W - 2 * margem - 3 * gap) / 4
+        draw_box(x0, y, box_w, 46, "Disciplina", dados.get("materias") or "-")
+        draw_box(x0 + (box_w + gap), y, box_w, 46, "Assunto", dados.get("temas") or dados.get("materias") or "-")
+        draw_box(x0 + 2 * (box_w + gap), y, box_w, 46, "Turma", "-")
+        draw_box(x0 + 3 * (box_w + gap), y, box_w, 46, "Data / Tempo", datetime.now().strftime("%d/%m/%Y"))
+        y -= 66
+
+    draw_header()
 
     if incluir_gabarito:
-        c.setFont("Helvetica-Bold", 14)
-        c.drawString(margem, y, "GABARITO OFICIAL DO PROFESSOR")
-        y -= 22
-
-        c.setFont("Helvetica", 11)
-        for questao, resposta in dados["gabarito_professor"].items():
-            if y < 55:
-                c.showPage()
-                y = altura_pagina - margem
-                c.setFont("Helvetica", 11)
-            c.drawString(margem, y, f"Questão {str(questao).zfill(2)}: {resposta}")
-            y -= 15
-
-        y -= 10
-        c.setFont("Helvetica-Bold", 12)
-        if y < 80:
-            c.showPage()
-            y = altura_pagina - margem
-        c.drawString(margem, y, "Explicações resumidas")
-        y -= 18
+        gabarito = dados["gabarito_professor"]
+        q_w = (W - 2 * margem - 4 * 7) / 5
+        x = x0
+        y_top = y
+        for idx, (questao, resposta) in enumerate(gabarito.items(), start=1):
+            draw_box(x, y_top, q_w, 52, f"Questão {questao}", resposta, value_size=16)
+            x += q_w + 7
+            if idx % 5 == 0:
+                x = x0
+                y_top -= 58
+        y = y_top - 26
+        c.setFillColor(muted)
+        c.setFont("Helvetica-Bold", 9)
+        c.drawString(x0, y, "RESOLUÇÕES E OBSERVAÇÕES")
+        y -= 17
         for q in dados["questoes"]:
-            y = _texto_pdf(
-                c,
-                f"{str(q.get('numero')).zfill(2)}. {q.get('explicacao', '')}",
-                margem,
-                y,
-                largura_texto,
-                tamanho=9,
-                entrelinha=12,
-            )
-            y -= 5
+            if y < 80:
+                c.showPage()
+                draw_header()
+            numero = q.get("numero", "")
+            enunciado = q.get("enunciado", "")
+            explicacao = q.get("explicacao", "")
+            correta = str(q.get("correta", dados["gabarito_professor"].get(str(numero), ""))).upper()
+            c.setFont("Helvetica-Bold", 9.5)
+            c.setFillColor(texto)
+            y = draw_wrapped(f"{numero}. {enunciado}", x0, y, W - 2 * margem, font="Helvetica-Bold", size=9.5, leading=12)
+            c.setFillColor(muted)
+            y = draw_wrapped(f"Resposta: {correta} - {explicacao}", x0, y, W - 2 * margem, font="Helvetica", size=8.8, leading=11)
+            c.setStrokeColor(colors.HexColor("#d7e2ef"))
+            c.line(x0, y - 5, W - margem, y - 5)
+            y -= 17
     else:
+        # Campo para nome do aluno, como no modelo.
+        c.setStrokeColor(border)
+        c.setFillColor(fill)
+        c.rect(x0, y - 30, W - 2 * margem, 30, stroke=1, fill=1)
+        c.setFillColor(muted)
+        c.setFont("Helvetica-Bold", 9)
+        c.drawString(x0 + 8, y - 19, "ALUNO:")
+        c.setStrokeColor(colors.HexColor("#7c8ca2"))
+        c.line(x0 + 55, y - 20, W - margem - 18, y - 20)
+        y -= 48
+
         for q in dados["questoes"]:
-            if y < 140:
+            if y < 115:
                 c.showPage()
-                y = altura_pagina - margem
-
+                draw_header()
+            numero = q.get("numero", "")
+            c.setFillColor(azul)
             c.setFont("Helvetica-Bold", 11)
-            c.drawString(margem, y, f"Questão {str(q.get('numero')).zfill(2)} - {q.get('area', '')}")
-            y -= 14
-            y = _texto_pdf(c, q.get("contexto", ""), margem, y, largura_texto, tamanho=9, entrelinha=12)
-            y -= 3
-            y = _texto_pdf(c, q.get("enunciado", ""), margem, y, largura_texto, fonte="Helvetica-Bold", tamanho=10, entrelinha=13)
-            y -= 4
-
+            c.drawString(x0, y, f"{numero}.")
+            y = draw_wrapped(q.get("enunciado", ""), x0 + 28, y, W - 2 * margem - 28, font="Helvetica-Bold", size=10.5, leading=13)
             alternativas = q.get("alternativas", {}) if isinstance(q.get("alternativas"), dict) else {}
             for alt in ["A", "B", "C", "D", "E"]:
-                y = _texto_pdf(
-                    c,
-                    f"{alt}) {alternativas.get(alt, '')}",
-                    margem + 10,
-                    y,
-                    largura_texto - 10,
-                    tamanho=9,
-                    entrelinha=12,
-                )
-            y -= 10
+                y = draw_wrapped(f"{alt}) {alternativas.get(alt, '')}", x0 + 20, y, W - 2 * margem - 20, size=9.5, leading=12)
+            y -= 9
 
     c.save()
     return caminho
@@ -1104,10 +1193,12 @@ def criar_prova():
     )
 
     prova_id = cursor.lastrowid
-    qr_arquivo = gerar_qr(aluno, prova_id, titulo, disciplina)
+    folha_codigo = gerar_codigo_folha(prova_id, aluno_id)
+    qr_arquivo = gerar_qr(aluno, prova_id, titulo, disciplina, folha_codigo=folha_codigo)
 
     conn.execute(
-        "UPDATE provas SET qr_arquivo = ? WHERE id = ?", (qr_arquivo, prova_id)
+        "UPDATE provas SET qr_arquivo = ?, folha_codigo = ? WHERE id = ?",
+        (qr_arquivo, folha_codigo, prova_id),
     )
     conn.commit()
     conn.close()
@@ -1129,6 +1220,25 @@ def folha(prova_id):
     """,
         (prova_id, int(professor_atual_id())),
     ).fetchone()
+
+    if prova and (not prova["folha_codigo"] or not prova["qr_arquivo"]):
+        aluno = conn.execute("SELECT * FROM alunos WHERE id = ?", (int(prova["aluno_id"]),)).fetchone()
+        folha_codigo = prova["folha_codigo"] or gerar_codigo_folha(prova_id, prova["aluno_id"])
+        qr_arquivo = prova["qr_arquivo"] or gerar_qr(aluno, prova_id, prova["titulo"], prova["disciplina"], folha_codigo=folha_codigo)
+        conn.execute(
+            "UPDATE provas SET folha_codigo = ?, qr_arquivo = ? WHERE id = ?",
+            (folha_codigo, qr_arquivo, int(prova_id)),
+        )
+        conn.commit()
+        prova = conn.execute(
+            """
+            SELECT provas.*, alunos.nome AS aluno_nome, alunos.matricula, alunos.turma
+            FROM provas
+            JOIN alunos ON alunos.id = provas.aluno_id
+            WHERE provas.id = ? AND provas.professor_id = ?
+            """,
+            (prova_id, int(professor_atual_id())),
+        ).fetchone()
 
     conn.close()
 
@@ -1341,8 +1451,18 @@ def selecionar_alunos_avaliacao(avaliacao_id):
                 ),
             )
             prova_id = cursor.lastrowid
-            qr_arquivo = gerar_qr(aluno, prova_id, dados_avaliacao["titulo"], dados_avaliacao["materias"])
-            conn.execute("UPDATE provas SET qr_arquivo = ? WHERE id = ?", (qr_arquivo, prova_id))
+            folha_codigo = gerar_codigo_folha(prova_id, aluno_id)
+            qr_arquivo = gerar_qr(
+                aluno,
+                prova_id,
+                dados_avaliacao["titulo"],
+                dados_avaliacao["materias"],
+                folha_codigo=folha_codigo,
+            )
+            conn.execute(
+                "UPDATE provas SET qr_arquivo = ?, folha_codigo = ? WHERE id = ?",
+                (qr_arquivo, folha_codigo, prova_id),
+            )
 
             prova_linha = conn.execute(
                 """

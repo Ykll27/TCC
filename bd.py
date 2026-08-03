@@ -125,6 +125,7 @@ def iniciar_banco():
                 total_questoes INTEGER NOT NULL,
                 gabarito_json TEXT NOT NULL,
                 qr_arquivo TEXT,
+                folha_codigo TEXT,
                 criado_em TEXT NOT NULL,
                 FOREIGN KEY (professor_id) REFERENCES professores(id),
                 FOREIGN KEY (avaliacao_id) REFERENCES avaliacoes(id),
@@ -259,6 +260,7 @@ def iniciar_banco():
             _adicionar_coluna_se_nao_existir(conn, tabela, "professor_id", "INTEGER")
         _adicionar_coluna_se_nao_existir(conn, "provas", "avaliacao_id", "INTEGER")
         _adicionar_coluna_se_nao_existir(conn, "provas", "qr_arquivo", "TEXT")
+        _adicionar_coluna_se_nao_existir(conn, "provas", "folha_codigo", "TEXT")
         _adicionar_coluna_se_nao_existir(conn, "resultados", "aluno_id", "INTEGER")
         _adicionar_coluna_se_nao_existir(conn, "resultados", "status_confianca", "TEXT DEFAULT 'confiavel'")
         _adicionar_coluna_se_nao_existir(conn, "avaliacoes", "status_revisao", "TEXT DEFAULT 'rascunho'")
@@ -273,6 +275,7 @@ def iniciar_banco():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_alunos_prof_turma ON alunos (professor_id, turma, nome)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_avaliacoes_prof ON avaliacoes (professor_id, id DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_provas_prof_avaliacao ON provas (professor_id, avaliacao_id, aluno_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_provas_folha_codigo ON provas (folha_codigo)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_resultados_prof ON resultados (professor_id, prova_id, criado_em)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_questoes_cache_busca ON questoes_cache (professor_id, materia, tema, modelo, aprovado)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_tarefas_ia_status ON tarefas_ia (status, criado_em)")
