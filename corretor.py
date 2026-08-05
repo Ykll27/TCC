@@ -1168,3 +1168,428 @@ def corrigir_imagem_web(
             "modelo_ia": MODELO_GEMINI if GOOGLE_API_KEY else None,
         },
     }
+
+# ---------------------------------------------------------------------------
+# HOTFIX QR SCAN V1 - leitura reforçada para frames de câmera
+# Esta definição sobrescreve a função ler_qrcode anterior.
+# Motivo: no Scan, o QR chega pequeno, com moiré/reflexo de tela e precisa
+# de crop + grayscale + upscale + threshold antes do detectAndDecode.
+# ---------------------------------------------------------------------------
+
+def _qr_crops_scan_v1(imagem: np.ndarray) -> List[Tuple[str, np.ndarray]]:
+    h, w = imagem.shape[:2]
+    crops = []
+
+    def add(nome: str, y1: float, y2: float, x1: float, x2: float):
+        yy1, yy2 = max(0, int(h * y1)), min(h, int(h * y2))
+        xx1, xx2 = max(0, int(w * x1)), min(w, int(w * x2))
+        crop = imagem[yy1:yy2, xx1:xx2]
+        if crop is not None and crop.size > 0 and crop.shape[0] >= 80 and crop.shape[1] >= 80:
+            crops.append((nome, crop))
+
+    # Modelo V1 na câmera: o QR pode aparecer no meio-direita, não só no topo.
+    add("v1_qr_miolo_direito", 0.32, 0.75, 0.50, 0.98)
+    add("v1_qr_direita_expandido", 0.20, 0.82, 0.42, 1.00)
+    add("v1_qr_centro_direita", 0.28, 0.78, 0.35, 0.90)
+
+    # Quando o usuário aponta a câmera diretamente para o QR, ele pode ficar centralizado.
+    add("centro", 0.18, 0.86, 0.18, 0.86)
+    add("centro_baixo", 0.32, 0.92, 0.15, 0.90)
+
+    # Modelos antigos: QR no cabeçalho/topo direito.
+    add("cabecalho_qr", 0.03, 0.45, 0.48, 0.99)
+    add("topo_direito", 0.00, 0.55, 0.42, 1.00)
+    add("topo", 0.00, 0.60, 0.00, 1.00)
+
+    crops.append(("inteira", imagem))
+    return crops
+
+
+def _qr_decode_cv2(imagem: np.ndarray) -> str:
+    detector = cv2.QRCodeDetector()
+    try:
+        data, _, _ = detector.detectAndDecode(imagem)
+        if data:
+            return str(data)
+    except Exception:
+        pass
+    try:
+        ok, infos, _, _ = detector.detectAndDecodeMulti(imagem)
+        if ok and infos:
+            for item in infos:
+                if item:
+                    return str(item)
+    except Exception:
+        pass
+    return ""
+
+
+def _qr_preparos_por_escala(gray: np.ndarray):
+    """Gera preparos um por vez para não estourar memória no Render."""
+    yield "gray", gray
+
+    try:
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8)).apply(gray)
+        yield "clahe", clahe
+    except Exception:
+        clahe = gray
+
+    try:
+        yield "equalizada", cv2.equalizeHist(gray)
+    except Exception:
+        pass
+
+    try:
+        kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
+        yield "sharpen", cv2.filter2D(gray, -1, kernel)
+    except Exception:
+        pass
+
+    # Este foi o tratamento que leu o QR das imagens enviadas: adaptive + upscale forte.
+    for bloco in (25, 31, 41, 51):
+        for c in (3, 5, 7, 9):
+            try:
+                blur = cv2.GaussianBlur(clahe, (3, 3), 0)
+                adaptive = cv2.adaptiveThreshold(
+                    blur,
+                    255,
+                    cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                    cv2.THRESH_BINARY,
+                    bloco,
+                    c,
+                )
+                yield f"adaptive_b{bloco}_c{c}", adaptive
+                yield f"adaptive_inv_b{bloco}_c{c}", cv2.bitwise_not(adaptive)
+            except Exception:
+                pass
+
+    try:
+        blur = cv2.GaussianBlur(gray, (3, 3), 0)
+        _, otsu = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        yield "otsu", otsu
+        yield "otsu_inv", cv2.bitwise_not(otsu)
+    except Exception:
+        pass
+
+
+def _qr_tentar_crop(crop: np.ndarray, nome_crop: str) -> Tuple[str, str]:
+    if crop is None or crop.size == 0:
+        return "", ""
+
+    if len(crop.shape) == 2:
+        gray_original = crop
+    else:
+        gray_original = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+
+    # Borda branca ajuda quando o crop fica perto demais do QR e perde quiet zone.
+    gray_original = cv2.copyMakeBorder(gray_original, 30, 30, 30, 30, cv2.BORDER_CONSTANT, value=255)
+
+    h, w = gray_original.shape[:2]
+
+    # Para QR de câmera, 5x/6x às vezes é necessário. Limite evita travar o Render.
+    escalas = (1.0, 2.0, 3.0, 4.0, 5.0, 6.0)
+    angulos = (0, -2, 2, -4, 4, -7, 7)
+    max_pixels = 55_000_000
+
+    for escala in escalas:
+        if int(h * escala) * int(w * escala) > max_pixels:
+            continue
+
+        if escala == 1.0:
+            gray = gray_original
+        else:
+            gray = cv2.resize(gray_original, None, fx=escala, fy=escala, interpolation=cv2.INTER_CUBIC)
+
+        for angulo in angulos:
+            base = _rotacionar_imagem(gray, angulo) if angulo else gray
+            for nome_preparo, tentativa in _qr_preparos_por_escala(base):
+                payload = _qr_decode_cv2(tentativa)
+                if payload:
+                    return payload, f"{nome_crop}|up{escala}x|rot{angulo}|{nome_preparo}"
+
+    return "", ""
+
+
+def ler_qrcode(caminho_imagem: str) -> Optional[Dict[str, Any]]:
+    """
+    HOTFIX: leitor forte para Upload e Scan.
+    Nunca usa aluno/prova base. Se falhar, retorna None e o app envia para revisão manual.
+    """
+    imagem = ler_imagem(caminho_imagem)
+    if imagem is None or imagem.size == 0:
+        return None
+
+    for nome_crop, crop in _qr_crops_scan_v1(imagem):
+        payload, tentativa = _qr_tentar_crop(crop, nome_crop)
+        if payload:
+            dados = _normalizar_payload_qr(payload)
+            if isinstance(dados, dict):
+                dados["_qr_tentativa"] = tentativa
+            return dados
+
+    return None
+
+# ---------------------------------------------------------------------------
+# HOTFIX QR SCAN V1 OTIMIZADO - sobrescreve novamente ler_qrcode
+# ---------------------------------------------------------------------------
+
+def _qr_preparos_rapidos(gray: np.ndarray):
+    yield "gray", gray
+    try:
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8)).apply(gray)
+        yield "clahe", clahe
+    except Exception:
+        clahe = gray
+    try:
+        yield "equalizada", cv2.equalizeHist(gray)
+    except Exception:
+        pass
+    for bloco, c in ((25, 7), (31, 7), (41, 7), (31, 5), (41, 5)):
+        try:
+            blur = cv2.GaussianBlur(clahe, (3, 3), 0)
+            adaptive = cv2.adaptiveThreshold(
+                blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, bloco, c
+            )
+            yield f"adaptive_b{bloco}_c{c}", adaptive
+        except Exception:
+            pass
+
+
+def _qr_tentar_crop_rapido(crop: np.ndarray, nome_crop: str) -> Tuple[str, str]:
+    if crop is None or crop.size == 0:
+        return "", ""
+    gray0 = crop if len(crop.shape) == 2 else cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    gray0 = cv2.copyMakeBorder(gray0, 30, 30, 30, 30, cv2.BORDER_CONSTANT, value=255)
+    h, w = gray0.shape[:2]
+    max_pixels = 60_000_000
+
+    # 1ª rodada: sem rotação. É rápida e resolve o caso do celular apontado para a tela.
+    for escala in (1.0, 2.0, 3.0, 4.0, 5.0, 6.0):
+        if int(h * escala) * int(w * escala) > max_pixels:
+            continue
+        gray = gray0 if escala == 1.0 else cv2.resize(gray0, None, fx=escala, fy=escala, interpolation=cv2.INTER_CUBIC)
+        for nome_preparo, img_try in _qr_preparos_rapidos(gray):
+            payload = _qr_decode_cv2(img_try)
+            if payload:
+                return payload, f"{nome_crop}|up{escala}x|rot0|{nome_preparo}"
+
+    # 2ª rodada: só se falhou mesmo. Rotações pequenas e poucas variantes.
+    for escala in (3.0, 4.0, 5.0):
+        if int(h * escala) * int(w * escala) > max_pixels:
+            continue
+        gray = cv2.resize(gray0, None, fx=escala, fy=escala, interpolation=cv2.INTER_CUBIC)
+        try:
+            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8)).apply(gray)
+        except Exception:
+            clahe = gray
+        for angulo in (-3, 3, -6, 6):
+            rot = _rotacionar_imagem(clahe, angulo)
+            payload = _qr_decode_cv2(rot)
+            if payload:
+                return payload, f"{nome_crop}|up{escala}x|rot{angulo}|clahe"
+            try:
+                adaptive = cv2.adaptiveThreshold(
+                    cv2.GaussianBlur(rot, (3, 3), 0), 255,
+                    cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 7
+                )
+                payload = _qr_decode_cv2(adaptive)
+                if payload:
+                    return payload, f"{nome_crop}|up{escala}x|rot{angulo}|adaptive_b31_c7"
+            except Exception:
+                pass
+    return "", ""
+
+
+def ler_qrcode(caminho_imagem: str) -> Optional[Dict[str, Any]]:
+    imagem = ler_imagem(caminho_imagem)
+    if imagem is None or imagem.size == 0:
+        return None
+
+    for nome_crop, crop in _qr_crops_scan_v1(imagem):
+        payload, tentativa = _qr_tentar_crop_rapido(crop, nome_crop)
+        if payload:
+            dados = _normalizar_payload_qr(payload)
+            if isinstance(dados, dict):
+                dados["_qr_tentativa"] = tentativa
+            return dados
+    return None
+
+# ---------------------------------------------------------------------------
+# HOTFIX FINAL QR CAMERA - sobrescreve ler_qrcode para Scan com câmera.
+# Otimizado para folha V1 capturada por celular/monitor: centro + crop + upscale.
+# ---------------------------------------------------------------------------
+
+def _atlas_decode_qr_cv2(img: np.ndarray) -> str:
+    det = cv2.QRCodeDetector()
+    try:
+        data, _, _ = det.detectAndDecode(img)
+        if data:
+            return str(data)
+    except Exception:
+        pass
+    try:
+        ok, infos, _, _ = det.detectAndDecodeMulti(img)
+        if ok and infos:
+            for item in infos:
+                if item:
+                    return str(item)
+    except Exception:
+        pass
+    return ""
+
+
+def _atlas_crops_qr_camera(img: np.ndarray) -> List[Tuple[str, np.ndarray]]:
+    h, w = img.shape[:2]
+    crops: List[Tuple[str, np.ndarray]] = []
+
+    def crop(nome: str, y1: float, y2: float, x1: float, x2: float):
+        a, b = max(0, int(h * y1)), min(h, int(h * y2))
+        c, d = max(0, int(w * x1)), min(w, int(w * x2))
+        rec = img[a:b, c:d]
+        if rec is not None and rec.size > 0 and rec.shape[0] > 80 and rec.shape[1] > 80:
+            crops.append((nome, rec))
+
+    # O usuário pode apontar o QR para o centro da câmera.
+    crop("centro", 0.16, 0.88, 0.14, 0.90)
+    crop("centro_direita", 0.22, 0.82, 0.34, 0.98)
+
+    # Modelo V1: QR no bloco de identificação à direita e abaixo do cabeçalho.
+    crop("v1_qr_miolo_direito", 0.30, 0.78, 0.48, 0.99)
+    crop("v1_qr_direita_expandido", 0.18, 0.84, 0.38, 1.00)
+
+    # Modelo antigo: QR no cabeçalho superior direito.
+    crop("cabecalho_direito", 0.02, 0.50, 0.45, 1.00)
+    crop("topo", 0.00, 0.60, 0.00, 1.00)
+
+    crops.append(("inteira", img))
+    return crops
+
+
+def _atlas_tentar_ler_qr_crop(crop: np.ndarray, nome_crop: str) -> Tuple[str, str]:
+    gray = crop if len(crop.shape) == 2 else cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    gray = cv2.copyMakeBorder(gray, 36, 36, 36, 36, cv2.BORDER_CONSTANT, value=255)
+    h, w = gray.shape[:2]
+    max_pixels = 62_000_000
+
+    # Primeiro tenta sem tratamento pesado.
+    for escala in (1.0, 2.0, 3.0):
+        if int(h * escala) * int(w * escala) > max_pixels:
+            continue
+        img = gray if escala == 1.0 else cv2.resize(gray, None, fx=escala, fy=escala, interpolation=cv2.INTER_CUBIC)
+        payload = _atlas_decode_qr_cv2(img)
+        if payload:
+            return payload, f"{nome_crop}|gray_up{escala}x"
+
+    # Tratamento que resolve QR pequeno/monitor/câmera: CLAHE + adaptive + upscale forte.
+    for escala in (5.0, 4.0, 6.0, 3.0):
+        if int(h * escala) * int(w * escala) > max_pixels:
+            continue
+        up = cv2.resize(gray, None, fx=escala, fy=escala, interpolation=cv2.INTER_CUBIC)
+        try:
+            base = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8)).apply(up)
+        except Exception:
+            base = up
+
+        for bloco, c in ((41, 7), (31, 7), (25, 7), (41, 5), (31, 5)):
+            try:
+                th = cv2.adaptiveThreshold(
+                    cv2.GaussianBlur(base, (3, 3), 0),
+                    255,
+                    cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                    cv2.THRESH_BINARY,
+                    bloco,
+                    c,
+                )
+                payload = _atlas_decode_qr_cv2(th)
+                if payload:
+                    return payload, f"{nome_crop}|adaptive_b{bloco}_c{c}_up{escala}x"
+            except Exception:
+                pass
+
+    return "", ""
+
+
+def ler_qrcode(caminho_imagem: str) -> Optional[Dict[str, Any]]:
+    img = ler_imagem(caminho_imagem)
+    if img is None or img.size == 0:
+        return None
+
+    for nome, crop in _atlas_crops_qr_camera(img):
+        payload, tentativa = _atlas_tentar_ler_qr_crop(crop, nome)
+        if payload:
+            dados = _normalizar_payload_qr(payload)
+            if isinstance(dados, dict):
+                dados["_qr_tentativa"] = tentativa
+            return dados
+
+    return None
+
+# ---------------------------------------------------------------------------
+# HOTFIX DEFINITIVO QR CAMERA V1 - crop calibrado pelo frame enviado pelo usuário.
+# ---------------------------------------------------------------------------
+
+def _atlas_crops_qr_camera(img: np.ndarray) -> List[Tuple[str, np.ndarray]]:
+    h, w = img.shape[:2]
+    crops: List[Tuple[str, np.ndarray]] = []
+    def crop(nome: str, y1: float, y2: float, x1: float, x2: float):
+        rec = img[max(0, int(h*y1)):min(h, int(h*y2)), max(0, int(w*x1)):min(w, int(w*x2))]
+        if rec is not None and rec.size > 0 and rec.shape[0] > 80 and rec.shape[1] > 80:
+            crops.append((nome, rec))
+
+    # Crop que leu o frame real enviado: folha na tela/câmera, QR no bloco direito.
+    crop("camera_v1_calibrado", 0.18, 0.86, 0.18, 0.86)
+    # Crop para folha inteira mais centralizada.
+    crop("camera_v1_centro_direita", 0.24, 0.82, 0.32, 0.96)
+    # Crop clássico do modelo V1.
+    crop("v1_identificacao_direita", 0.30, 0.76, 0.46, 0.99)
+    # Modelo antigo: QR no cabeçalho.
+    crop("cabecalho_direito", 0.02, 0.48, 0.45, 1.00)
+    crop("topo", 0.00, 0.60, 0.00, 1.00)
+    crops.append(("inteira", img))
+    return crops
+
+
+def _atlas_tentar_ler_qr_crop(crop: np.ndarray, nome_crop: str) -> Tuple[str, str]:
+    gray = crop if len(crop.shape) == 2 else cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    gray = cv2.copyMakeBorder(gray, 30, 30, 30, 30, cv2.BORDER_CONSTANT, value=255)
+    h, w = gray.shape[:2]
+    max_pixels = 60_000_000
+
+    # Ordem calibrada: no frame real, funcionou com adaptive + up5.
+    planos = [
+        (5.0, "adaptive"), (4.0, "adaptive"), (6.0, "adaptive"), (3.0, "adaptive"),
+        (2.0, "gray"), (3.0, "gray"), (1.0, "gray"),
+    ]
+
+    for escala, modo in planos:
+        if int(h * escala) * int(w * escala) > max_pixels:
+            continue
+        img = gray if escala == 1.0 else cv2.resize(gray, None, fx=escala, fy=escala, interpolation=cv2.INTER_CUBIC)
+        if modo == "gray":
+            payload = _atlas_decode_qr_cv2(img)
+            if payload:
+                return payload, f"{nome_crop}|gray_up{escala}x"
+            continue
+
+        try:
+            base = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8)).apply(img)
+        except Exception:
+            base = img
+
+        for bloco, c in ((41, 7), (31, 7), (25, 7), (41, 5), (31, 5)):
+            try:
+                th = cv2.adaptiveThreshold(
+                    cv2.GaussianBlur(base, (3, 3), 0),
+                    255,
+                    cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                    cv2.THRESH_BINARY,
+                    bloco,
+                    c,
+                )
+                payload = _atlas_decode_qr_cv2(th)
+                if payload:
+                    return payload, f"{nome_crop}|adaptive_b{bloco}_c{c}_up{escala}x"
+            except Exception:
+                pass
+
+    return "", ""
