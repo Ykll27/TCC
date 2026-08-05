@@ -122,9 +122,16 @@ def _regioes_provaveis_qr(imagem: np.ndarray) -> List[Tuple[str, np.ndarray]]:
     h, w = imagem.shape[:2]
     regioes = [
         # Os crops vêm primeiro porque são muito mais rápidos e evitam o QR ficar pequeno demais.
-        ("cabecalho_qr", imagem[int(h * 0.04):int(h * 0.36), int(w * 0.50):int(w * 0.98)]),
-        ("topo_direito", imagem[0:int(h * 0.45), int(w * 0.42):w]),
-        ("topo", imagem[0:int(h * 0.45), 0:w]),
+        # Modelo antigo: QR no cabeçalho superior direito.
+        ("cabecalho_qr", imagem[int(h * 0.04):int(h * 0.40), int(w * 0.50):int(w * 0.98)]),
+        ("topo_direito", imagem[0:int(h * 0.50), int(w * 0.42):w]),
+
+        # Modelo V1: QR costuma ficar no bloco de identificação à direita, um pouco abaixo do cabeçalho.
+        ("qr_v1_direita", imagem[int(h * 0.22):int(h * 0.62), int(w * 0.58):int(w * 0.96)]),
+        ("qr_v1_direita_expandido", imagem[int(h * 0.16):int(h * 0.70), int(w * 0.48):int(w * 0.99)]),
+
+        # Fallbacks gerais.
+        ("topo", imagem[0:int(h * 0.55), 0:w]),
         ("inteira", imagem),
     ]
     return [(nome, crop) for nome, crop in regioes if crop is not None and crop.size > 0]
@@ -162,6 +169,14 @@ def _variantes_qr(imagem: np.ndarray) -> List[Tuple[str, np.ndarray]]:
         clahe = gray
 
     variantes.append(("equalizada", cv2.equalizeHist(gray)))
+
+    # Nitidez ajuda QR capturado por câmera quando há leve desfoque.
+    try:
+        kernel_sharp = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
+        sharpen = cv2.filter2D(gray, -1, kernel_sharp)
+        variantes.append(("sharpen", sharpen))
+    except Exception:
+        pass
 
     blur = cv2.GaussianBlur(clahe, (3, 3), 0)
     for bloco in [21, 31, 41]:
@@ -227,7 +242,7 @@ def ler_qrcode(caminho_imagem: str) -> Optional[Dict[str, Any]]:
     if payload:
         return _normalizar_payload_qr(payload)
 
-    escalas_padrao = [1.0, 1.5, 2.0, 3.0]
+    escalas_padrao = [1.0, 1.5, 2.0, 3.0, 4.0]
     angulos_padrao = [0, -3, 3, -6, 6, -10, 10]
 
     for nome_regiao, regiao in _regioes_provaveis_qr(imagem):

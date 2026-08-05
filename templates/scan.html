@@ -2,7 +2,7 @@
 {% block title %}Atlas - Scan{% endblock %}
 {% block head %}
 <style>
-.camera-box{position:relative;background:#070b12;border-radius:22px;overflow:hidden;min-height:320px}#videoScan{width:100%;max-height:72vh;object-fit:contain;display:block;background:#070b12}.scan-guide{position:absolute;inset:8%;border:3px dashed rgba(255,255,255,.75);border-radius:18px;pointer-events:none;box-shadow:0 0 0 9999px rgba(0,0,0,.18)}.scan-guide.ok{border-color:#21c45d}.scan-guide.warn{border-color:#ffc107}.scan-guide.err{border-color:#dc3545}.big-number{font-size:2.2rem;font-weight:900;line-height:1}.reading-item{border-left:5px solid #adb5bd}.reading-item.ok{border-left-color:#198754}.reading-item.revisao{border-left-color:#ffc107}.latency-ok{color:#198754;font-weight:800}.latency-warn{color:#dc3545;font-weight:900}.scan-small{font-size:.88rem;color:#6c757d}.scan-pause-box{border:1px dashed #ffc107;background:#fff8e1;border-radius:14px;padding:10px 12px}
+.camera-box{position:relative;background:#070b12;border-radius:22px;overflow:hidden;min-height:320px}#videoScan{width:100%;max-height:72vh;object-fit:contain;display:block;background:#070b12}.scan-guide{position:absolute;inset:8%;border:3px dashed rgba(255,255,255,.75);border-radius:18px;pointer-events:none;box-shadow:0 0 0 9999px rgba(0,0,0,.18)}.scan-guide.ok{border-color:#21c45d}.scan-guide.warn{border-color:#ffc107}.scan-guide.err{border-color:#dc3545}.big-number{font-size:2.2rem;font-weight:900;line-height:1}.reading-item{border-left:5px solid #adb5bd}.reading-item.ok{border-left-color:#198754}.reading-item.revisao{border-left-color:#ffc107}.latency-ok{color:#198754;font-weight:800}.latency-warn{color:#dc3545;font-weight:900}
 </style>
 {% endblock %}
 {% block content %}
@@ -10,30 +10,20 @@
     <div class="col-lg-8">
         <div class="card atlas-card mb-4"><div class="card-body p-4">
             <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
-                <div><h1 class="atlas-title mb-1">Scan em tempo real</h1><p class="atlas-subtitle mb-0">Correção por câmera com OpenCV. O loop automático pausa quando não encontra QR para evitar análise infinita.</p></div>
+                <div><h1 class="atlas-title mb-1">Scan em tempo real</h1><p class="atlas-subtitle mb-0">Correção por câmera com OpenCV. A IA fica desligada nesse modo para manter velocidade e evitar sobrecarga.</p></div>
                 <span id="badgeSessao" class="badge text-bg-secondary fs-6">Sem sessão</span>
             </div>
             {% if not provas %}<div class="alert alert-warning">Gere folhas de resposta para os alunos antes de usar o Scan.</div>{% else %}
             <div class="row g-3 align-items-end mb-3">
-                <div class="col-md-7"><label class="form-label">Prova base</label><select id="provaBase" class="form-select">{% for prova in provas %}<option value="{{ prova.id }}">#{{ prova.id }} - {{ prova.titulo }} - {{ prova.aluno_nome }}</option>{% endfor %}</select><div class="form-text">O QR Code é obrigatório para salvar automaticamente. Se falhar, a folha vai para identificação manual.</div></div>
+                <div class="col-md-7"><label class="form-label">Prova base/fallback</label><select id="provaBase" class="form-select">{% for prova in provas %}<option value="{{ prova.id }}">#{{ prova.id }} - {{ prova.titulo }} - {{ prova.aluno_nome }}</option>{% endfor %}</select><div class="form-text">O QR Code é obrigatório para salvar automaticamente. Se falhar, a folha vai para identificação manual.</div></div>
                 <div class="col-md-5"><label class="form-label">Tipo de correção</label><select id="modoScan" class="form-select"><option value="individual">Individual: corrige uma folha e pausa</option><option value="multipla">Múltipla: corrige em sequência</option></select></div>
             </div>
-            <div class="d-flex flex-wrap gap-2 mb-3">
-                <button id="btnIniciar" class="btn btn-atlas" type="button">Iniciar câmera</button>
-                <button id="btnAnalisar" class="btn btn-success" type="button" disabled>Analisar agora</button>
-                <button id="btnPausar" class="btn btn-outline-secondary" type="button" disabled>Pausar automático</button>
-                <button id="btnIdentificarManual" class="btn btn-outline-warning" type="button" disabled>Enviar frame para identificação manual</button>
-                <button id="btnFinalizar" class="btn btn-outline-danger" type="button" disabled>Finalizar e desligar câmera</button>
-            </div>
-            <div class="scan-pause-box mb-3 d-none" id="boxPausaQr">
-                <strong>Leitura automática pausada.</strong>
-                <div class="scan-small">O Atlas tentou alguns frames e não encontrou QR com segurança. Ajuste a folha e clique em <b>Retomar automático</b>, ou envie o frame atual para <b>Identificação Manual</b>.</div>
-            </div>
+            <div class="d-flex flex-wrap gap-2 mb-3"><button id="btnIniciar" class="btn btn-atlas" type="button">Iniciar câmera</button><button id="btnAnalisar" class="btn btn-success" type="button" disabled>Analisar agora</button><button id="btnPausar" class="btn btn-outline-secondary" type="button" disabled>Retomar automático</button><button id="btnIdentificacao" class="btn btn-outline-warning" type="button" disabled>Enviar frame para identificação manual</button><button id="btnFinalizar" class="btn btn-outline-danger" type="button" disabled>Finalizar e desligar câmera</button></div>
             {% endif %}
             <div id="statusScan" class="alert alert-secondary">Aguardando início da sessão.</div>
             <div class="camera-box"><video id="videoScan" autoplay playsinline muted></video><div id="scanGuide" class="scan-guide"></div></div>
             <canvas id="canvasScan" class="d-none"></canvas>
-            <div class="small-muted mt-2">Proteção: sem frames simultâneos, pausa automática após falhas seguidas e câmera desligada ao sair.</div>
+            <div class="small-muted mt-2">Proteção adicionada: ao sair dessa tela, finalizar sessão ou trocar de página, a câmera é desligada automaticamente.</div>
         </div></div>
     </div>
     <div class="col-lg-4">
@@ -52,19 +42,12 @@ let autoAtivo = false;
 let emProcessamento = false;
 let loopTimer = null;
 let leituras = [];
-let falhasQrSeguidas = 0;
+let falhasQrConsecutivas = 0;
 let framesNoCiclo = 0;
-let ultimoFrameDataUrl = '';
-let ultimoStatus = '';
 
-// CORREÇÃO DO LOOP INFINITO:
-// O automático agora funciona em "rajadas" curtas. Ele NUNCA fica analisando
-// para sempre. Depois de algumas tentativas sem QR, duplicata, revisão ou
-// sucesso, ele pausa e espera o professor retomar manualmente.
-const MAX_FALHAS_QR = 4;
 const MAX_FRAMES_POR_CICLO = 5;
-const DELAY_BUSCA = 380;
-const DELAY_APOS_ERRO = 650;
+const MAX_FALHAS_QR = 4;
+const INTERVALO_SCAN_MS = 450;
 
 const video = document.getElementById('videoScan');
 const canvas = document.getElementById('canvasScan');
@@ -74,21 +57,16 @@ const badgeSessao = document.getElementById('badgeSessao');
 const btnIniciar = document.getElementById('btnIniciar');
 const btnAnalisar = document.getElementById('btnAnalisar');
 const btnPausar = document.getElementById('btnPausar');
-const btnIdentificarManual = document.getElementById('btnIdentificarManual');
+const btnIdentificacao = document.getElementById('btnIdentificacao');
 const btnFinalizar = document.getElementById('btnFinalizar');
-const boxPausaQr = document.getElementById('boxPausaQr');
 
 function setStatus(msg, tipo = 'secondary') {
   statusScan.className = `alert alert-${tipo}`;
-  statusScan.innerHTML = msg;
+  statusScan.textContent = msg;
 }
 
 function setGuide(tipo) {
   guide.className = 'scan-guide' + (tipo ? ` ${tipo}` : '');
-}
-
-function setBoxPausa(visivel) {
-  if (boxPausaQr) boxPausaQr.classList.toggle('d-none', !visivel);
 }
 
 function beep(tipo = 'ok') {
@@ -100,7 +78,7 @@ function beep(tipo = 'ok') {
     osc.connect(gain);
     gain.connect(ctx.destination);
     osc.frequency.value = tipo === 'ok' ? 880 : 280;
-    gain.gain.value = 0.06;
+    gain.gain.value = .06;
     osc.start();
     setTimeout(() => { osc.stop(); ctx.close(); }, tipo === 'ok' ? 120 : 220);
   } catch (e) {}
@@ -119,12 +97,12 @@ function atualizarResumo(resumo) {
 }
 
 function adicionarLeitura(resp) {
-  if (!['ok', 'revisao'].includes(resp.status)) return;
+  if (!['ok', 'revisao', 'duplicado'].includes(resp.status)) return;
   leituras.unshift(resp);
   leituras = leituras.slice(0, 8);
   document.getElementById('listaLeituras').innerHTML = leituras.map(r => {
-    const classe = r.status === 'ok' ? 'ok' : 'revisao';
-    const badge = r.status === 'ok' ? 'text-bg-success' : 'text-bg-warning';
+    const classe = r.status === 'ok' ? 'ok' : (r.status === 'revisao' ? 'revisao' : '');
+    const badge = r.status === 'ok' ? 'text-bg-success' : (r.status === 'revisao' ? 'text-bg-warning' : 'text-bg-secondary');
     return `<div class="reading-item ${classe} bg-light rounded p-2">
       <div class="d-flex justify-content-between gap-2"><strong>${r.aluno || 'Aluno'}</strong><span class="badge ${badge}">${r.status}</span></div>
       <div class="small-muted">${r.prova || 'Prova'}</div>
@@ -140,6 +118,8 @@ async function abrirCameraScan() {
   if (!window.isSecureContext && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
     throw new Error('A câmera exige HTTPS ou localhost.');
   }
+
+  // Alta resolução: o Scan agora envia o frame com qualidade parecida com Upload.
   streamScan = await navigator.mediaDevices.getUserMedia({
     video: {
       facingMode: { ideal: 'environment' },
@@ -148,10 +128,12 @@ async function abrirCameraScan() {
     },
     audio: false
   });
+
   video.srcObject = streamScan;
+  await video.play();
 }
 
-function limparTimer() {
+function limparTimerAuto() {
   if (loopTimer) {
     clearTimeout(loopTimer);
     loopTimer = null;
@@ -160,20 +142,12 @@ function limparTimer() {
 
 function pararCameraScan() {
   autoAtivo = false;
-  limparTimer();
+  limparTimerAuto();
   if (streamScan) {
     streamScan.getTracks().forEach(t => { try { t.stop(); } catch (e) {} });
   }
   streamScan = null;
   if (video) video.srcObject = null;
-}
-
-function pausarAutomatico(mensagem, tipo = 'warning') {
-  autoAtivo = false;
-  limparTimer();
-  setBoxPausa(true);
-  if (btnPausar) btnPausar.textContent = 'Retomar automático';
-  if (mensagem) setStatus(mensagem, tipo);
 }
 
 function finalizarSessaoSilenciosa() {
@@ -199,41 +173,27 @@ function desligarAoSair() {
 }
 
 function capturarFrameDataUrl() {
-  if (!video.videoWidth || !video.videoHeight) throw new Error('A câmera ainda não carregou.');
-  const maxWidth = 1920;
-  const escala = Math.min(1, maxWidth / video.videoWidth);
-  canvas.width = Math.round(video.videoWidth * escala);
-  canvas.height = Math.round(video.videoHeight * escala);
-  canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
-  ultimoFrameDataUrl = canvas.toDataURL('image/jpeg', 0.96);
-  if (btnIdentificarManual) btnIdentificarManual.disabled = false;
-  return ultimoFrameDataUrl;
-}
-
-function agendarProximaAnalise(delay = DELAY_BUSCA) {
-  limparTimer();
-  if (!autoAtivo || !sessaoId || emProcessamento) return;
-
-  // Trava local final: mesmo se algum retorno inesperado acontecer, o ciclo
-  // para sozinho e não vira loop infinito.
-  if (framesNoCiclo >= MAX_FRAMES_POR_CICLO) {
-    pausarAutomatico('Scan pausado após uma rajada curta de análise. Ajuste a folha e clique em Retomar automático.', 'warning');
-    return;
+  if (!video.videoWidth || !video.videoHeight) {
+    throw new Error('A câmera ainda não carregou.');
   }
 
-  loopTimer = setTimeout(() => analisarFrame(false), delay);
+  // Não reduz resolução do frame. O backend recebe a mesma imagem capturada pela câmera.
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+  // JPEG em alta qualidade para QR pequeno não perder módulos.
+  return canvas.toDataURL('image/jpeg', 0.98);
 }
 
 async function iniciarSessao() {
   try {
     setStatus('Abrindo câmera e iniciando sessão...');
     await abrirCameraScan();
-    const provaEl = document.getElementById('provaBase');
-    const modoEl = document.getElementById('modoScan');
-    if (!provaEl) throw new Error('Nenhuma prova disponível para iniciar o Scan.');
 
-    const provaId = provaEl.value;
-    const modo = modoEl.value;
+    const provaId = document.getElementById('provaBase').value;
+    const modo = document.getElementById('modoScan').value;
     const resp = await fetch("{{ url_for('iniciar_sessao_scan_rota') }}", {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -244,18 +204,19 @@ async function iniciarSessao() {
 
     sessaoId = dados.sessao_id;
     autoAtivo = false;
-    falhasQrSeguidas = 0;
+    falhasQrConsecutivas = 0;
     framesNoCiclo = 0;
-    setBoxPausa(false);
+
     badgeSessao.className = 'badge text-bg-success fs-6';
     badgeSessao.textContent = `Sessão #${sessaoId} - ${modo}`;
     btnIniciar.disabled = true;
     btnAnalisar.disabled = false;
     btnPausar.disabled = false;
+    if (btnIdentificacao) btnIdentificacao.disabled = false;
     btnFinalizar.disabled = false;
-    if (btnIdentificarManual) btnIdentificarManual.disabled = true;
+    btnPausar.textContent = 'Retomar automático';
 
-    setStatus('Câmera ligada. Clique em Analisar agora ou em Retomar automático para ler uma rajada curta de frames.', 'info');
+    setStatus('Câmera iniciada em alta resolução. Posicione a folha e clique em Analisar agora.', 'info');
   } catch (erro) {
     setStatus(erro.message || 'Erro ao iniciar Scan.', 'danger');
     pararCameraScan();
@@ -263,31 +224,34 @@ async function iniciarSessao() {
   }
 }
 
-function atualizarTimerLatencia(latencia) {
-  document.getElementById('ultimaLatencia').textContent = latencia;
-  document.getElementById('ultimaLatencia').className = latencia >= 1500 ? 'big-number latency-warn' : 'big-number latency-ok';
-  document.getElementById('alertaLentidao').className = latencia >= 1500 ? 'alert alert-danger mt-3 mb-0 small' : 'alert alert-light border mt-3 mb-0 small';
-  document.getElementById('alertaLentidao').textContent = latencia >= 1500 ? 'Leitura lenta. Melhore a luz ou aproxime a folha.' : 'Tempo dentro do esperado.';
+function agendarProximoFrame() {
+  limparTimerAuto();
+  if (!autoAtivo || emProcessamento) return;
+
+  if (framesNoCiclo >= MAX_FRAMES_POR_CICLO || falhasQrConsecutivas >= MAX_FALHAS_QR) {
+    autoAtivo = false;
+    btnPausar.textContent = 'Retomar automático';
+    setStatus('Scan pausado. QR não encontrado com segurança. Aproxime a folha, melhore o foco e clique em Analisar agora.', 'warning');
+    setGuide('warn');
+    return;
+  }
+
+  loopTimer = setTimeout(() => analisarFrame(false), INTERVALO_SCAN_MS);
 }
 
-async function analisarFrame(forcarPendencia = false, resetContador = false) {
+async function analisarFrame(forcarPendencia = false) {
   if (!sessaoId || emProcessamento) return;
   emProcessamento = true;
-  limparTimer();
-
-  if (!forcarPendencia) framesNoCiclo++;
-
+  framesNoCiclo += 1;
   const inicioLocal = performance.now();
-  let proximoDelay = DELAY_BUSCA;
 
   try {
     setGuide('');
-    if (!forcarPendencia) {
-      setStatus(`Analisando frame ${framesNoCiclo}/${MAX_FRAMES_POR_CICLO} · Tentativa QR ${falhasQrSeguidas + 1}/${MAX_FALHAS_QR}`, 'secondary');
-    }
+    setStatus(forcarPendencia ? 'Enviando frame para identificação manual...' : `Analisando frame ${framesNoCiclo}/${MAX_FRAMES_POR_CICLO}...`);
 
     const imagem = capturarFrameDataUrl();
     const provaId = document.getElementById('provaBase').value;
+
     const resp = await fetch("{{ url_for('processar_frame_scan_rota') }}", {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -295,103 +259,76 @@ async function analisarFrame(forcarPendencia = false, resetContador = false) {
         sessao_id: sessaoId,
         prova_id: provaId,
         imagem,
-        forcar_pendencia: forcarPendencia,
-        reset_contador: resetContador
+        forcar_pendencia: Boolean(forcarPendencia)
       })
     });
 
     const dados = await resp.json();
-    ultimoStatus = dados.status || '';
     const latencia = Math.round(dados.latencia_ms || performance.now() - inicioLocal);
-    atualizarTimerLatencia(latencia);
-    atualizarResumo(dados.resumo);
+
+    document.getElementById('ultimaLatencia').textContent = latencia;
+    document.getElementById('ultimaLatencia').className = latencia >= 1500 ? 'big-number latency-warn' : 'big-number latency-ok';
+    document.getElementById('alertaLentidao').className = latencia >= 1500 ? 'alert alert-danger mt-3 mb-0 small' : 'alert alert-light border mt-3 mb-0 small';
+    document.getElementById('alertaLentidao').textContent = latencia >= 1500 ? 'Leitura lenta. Melhore a luz ou aproxime a folha.' : 'Tempo dentro do esperado.';
 
     if (!dados.ok) {
-      if (dados.status === 'aguardando_intervalo') {
-        proximoDelay = DELAY_BUSCA;
-        setGuide('warn');
-        setStatus('Aguardando intervalo mínimo entre frames.', 'secondary');
-        return;
-      }
+      atualizarResumo(dados.resumo);
+      setGuide(dados.status === 'buscando_qr' ? 'warn' : 'err');
 
       if (dados.status === 'buscando_qr') {
-        falhasQrSeguidas++;
-        setGuide('warn');
-        if (falhasQrSeguidas >= MAX_FALHAS_QR) {
-          pausarAutomatico('QR não encontrado. O Scan foi pausado para evitar análise infinita. Ajuste foco/luz/distância e retome.', 'warning');
-          return;
-        }
-        setStatus(`QR ainda não lido. Tentativa ${falhasQrSeguidas}/${MAX_FALHAS_QR}.`, 'warning');
-        proximoDelay = DELAY_BUSCA;
-        return;
-      }
-
-      if (dados.status === 'scan_pausado') {
-        setGuide('warn');
-        pausarAutomatico(dados.mensagem || 'Scan pausado automaticamente pelo servidor para evitar loop infinito.', 'warning');
-        return;
-      }
-
-      if (dados.status === 'qr_nao_lido_pendente') {
+        falhasQrConsecutivas += 1;
+        setStatus(dados.mensagem || 'QR não encontrado. Ajuste a folha e tente novamente.', 'warning');
+      } else {
         autoAtivo = false;
-        setBoxPausa(false);
-        const link = dados.pendencia_url ? ` <a class="alert-link" href="${dados.pendencia_url}">Abrir identificação manual</a>` : '';
-        setGuide('warn');
-        setStatus((dados.mensagem || 'Frame enviado para identificação manual.') + link, 'warning');
-        return;
+        btnPausar.textContent = 'Retomar automático';
+        const extra = dados.pendencia_url ? ` Abra a identificação manual pelo menu de pendências.` : '';
+        setStatus((dados.mensagem || 'Não foi possível corrigir.') + extra, 'warning');
       }
-
-      falhasQrSeguidas++;
-      setGuide('err');
-      if (falhasQrSeguidas >= MAX_FALHAS_QR) {
-        pausarAutomatico(dados.mensagem || 'Scan pausado após falhas seguidas.', 'danger');
-        return;
-      }
-      setStatus(dados.mensagem || 'Não foi possível corrigir.', 'danger');
-      proximoDelay = DELAY_APOS_ERRO;
       return;
     }
 
-    // Qualquer retorno identificado para o ciclo automático. Isso impede que
-    // duplicado/revisão/sucesso fiquem reenviando frames sem parar.
-    falhasQrSeguidas = 0;
-    framesNoCiclo = 0;
-    setBoxPausa(false);
+    falhasQrConsecutivas = 0;
+    atualizarResumo(dados.resumo);
     adicionarLeitura(dados);
 
     if (dados.status === 'ok') {
       setGuide('ok');
-      setStatus(`${dados.aluno}: ${dados.nota_percentual}% (${dados.acertos}/${dados.total_questoes}) · ${latencia} ms. Troque a folha e clique em Retomar automático.`, 'success');
+      setStatus(`${dados.aluno}: ${dados.nota_percentual}% (${dados.acertos}/${dados.total_questoes}) · ${latencia} ms`, 'success');
       beep('ok');
       vibrar('ok');
-      pausarAutomatico('', 'success');
-      return;
-    }
-
-    if (dados.status === 'duplicado') {
+      autoAtivo = false;
+      btnPausar.textContent = 'Retomar automático';
+    } else if (dados.status === 'duplicado') {
       setGuide('warn');
-      pausarAutomatico(dados.mensagem || 'Folha duplicada. Troque a folha e clique em Retomar automático.', 'secondary');
-      return;
-    }
-
-    setGuide('warn');
-    beep('erro');
-    vibrar('erro');
-    pausarAutomatico(`${dados.aluno || 'Folha'}: precisa revisar. ${dados.mensagem || ''}`, 'warning');
-  } catch (erro) {
-    falhasQrSeguidas++;
-    setGuide('err');
-    if (falhasQrSeguidas >= MAX_FALHAS_QR) {
-      pausarAutomatico(erro.message || 'Scan pausado após erros seguidos.', 'danger');
+      setStatus(dados.mensagem, 'secondary');
+      autoAtivo = false;
+      btnPausar.textContent = 'Retomar automático';
     } else {
-      setStatus(erro.message || 'Erro no Scan.', 'danger');
+      setGuide('warn');
+      setStatus(`${dados.aluno || 'Folha'}: precisa revisar. ${dados.mensagem || ''}`, 'warning');
+      beep('erro');
+      vibrar('erro');
+      autoAtivo = false;
+      btnPausar.textContent = 'Retomar automático';
     }
+  } catch (erro) {
+    setGuide('err');
+    setStatus(erro.message || 'Erro no Scan.', 'danger');
+    autoAtivo = false;
+    btnPausar.textContent = 'Retomar automático';
     console.error(erro);
-    proximoDelay = DELAY_APOS_ERRO;
   } finally {
     emProcessamento = false;
-    if (autoAtivo) agendarProximaAnalise(proximoDelay);
+    agendarProximoFrame();
   }
+}
+
+async function enviarFrameParaIdentificacaoManual() {
+  framesNoCiclo = 0;
+  falhasQrConsecutivas = 0;
+  autoAtivo = false;
+  btnPausar.textContent = 'Retomar automático';
+  await analisarFrame(true);
 }
 
 async function finalizarSessao() {
@@ -400,7 +337,7 @@ async function finalizarSessao() {
     return;
   }
   autoAtivo = false;
-  limparTimer();
+  limparTimerAuto();
   const id = sessaoId;
   try {
     await fetch("{{ url_for('finalizar_sessao_scan_rota') }}", {
@@ -415,28 +352,22 @@ async function finalizarSessao() {
 }
 
 if (btnIniciar) btnIniciar.addEventListener('click', iniciarSessao);
-if (btnAnalisar) btnAnalisar.addEventListener('click', () => analisarFrame(false, true));
-if (btnIdentificarManual) btnIdentificarManual.addEventListener('click', () => {
+if (btnAnalisar) btnAnalisar.addEventListener('click', () => {
   autoAtivo = false;
   framesNoCiclo = 0;
-  setBoxPausa(false);
-  analisarFrame(true, false);
+  falhasQrConsecutivas = 0;
+  btnPausar.textContent = 'Retomar automático';
+  analisarFrame(false);
 });
 if (btnPausar) btnPausar.addEventListener('click', () => {
-  if (!sessaoId) return;
   autoAtivo = !autoAtivo;
   btnPausar.textContent = autoAtivo ? 'Pausar automático' : 'Retomar automático';
-  setBoxPausa(false);
-  if (autoAtivo) {
-    falhasQrSeguidas = 0;
-    framesNoCiclo = 0;
-    setStatus('Leitura automática retomada em rajada curta. Ela vai pausar sozinha se não encontrar QR.', 'info');
-    agendarProximaAnalise(120);
-  } else {
-    limparTimer();
-    setStatus('Leitura automática pausada.', 'info');
-  }
+  framesNoCiclo = 0;
+  falhasQrConsecutivas = 0;
+  setStatus(autoAtivo ? 'Leitura automática em rajada iniciada.' : 'Leitura automática pausada.', 'info');
+  if (autoAtivo) agendarProximoFrame(); else limparTimerAuto();
 });
+if (btnIdentificacao) btnIdentificacao.addEventListener('click', enviarFrameParaIdentificacaoManual);
 if (btnFinalizar) btnFinalizar.addEventListener('click', finalizarSessao);
 
 window.addEventListener('beforeunload', desligarAoSair);

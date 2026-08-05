@@ -35,36 +35,6 @@ app.config["MAX_CONTENT_LENGTH"] = 60 * 1024 * 1024
 iniciar_banco()
 
 
-# Estado leve em memória para proteger o Scan contra loop infinito.
-# No Render usamos 1 worker no Procfile; mesmo assim, a trava principal
-# também fica no frontend. Esse dicionário evita abuso/requisições repetidas
-# quando o navegador mantém a tela aberta sem QR visível.
-SCAN_RUNTIME_STATE = {}
-SCAN_MAX_QR_FAILS_BACKEND = 5
-SCAN_MIN_INTERVAL_SECONDS = 0.22
-
-
-def scan_state(sessao_id: int) -> dict:
-    estado = SCAN_RUNTIME_STATE.setdefault(int(sessao_id), {
-        "qr_fails": 0,
-        "last_request_ts": 0.0,
-        "paused": False,
-    })
-    return estado
-
-
-def reset_scan_state(sessao_id: int):
-    SCAN_RUNTIME_STATE[int(sessao_id)] = {
-        "qr_fails": 0,
-        "last_request_ts": 0.0,
-        "paused": False,
-    }
-
-
-def limpar_scan_state(sessao_id: int):
-    SCAN_RUNTIME_STATE.pop(int(sessao_id), None)
-
-
 def professor_atual_id():
     return session.get("professor_id")
 
@@ -763,7 +733,7 @@ def salvar_frame_base64(data_url: str) -> Path:
     if len(dados) < 5_000:
         raise RuntimeError("Imagem muito pequena. Aproxime a folha e tente novamente.")
 
-    if len(dados) > 12_000_000:
+    if len(dados) > 25_000_000:
         raise RuntimeError("Imagem muito grande. Reduza a resolução da câmera.")
 
     caminho = UPLOAD_DIR / f"scan_{datetime.now().strftime('%Y%m%d%H%M%S%f')}_{uuid.uuid4().hex[:8]}.jpg"
@@ -793,6 +763,83 @@ def buscar_prova_com_aluno(conn, prova_id: int):
         (int(prova_id),),
     ).fetchone()
 
+
+
+def corrigir_folha_por_pipeline_unico(conn, caminho: Path, origem: str = "upload", criar_pendencia: bool = False, nome_arquivo: str = ""):
+    """
+    Pipeline único de correção usado por Upload e Scan.
+
+    Regras:
+    - QR Code é obrigatório para salvar automaticamente.
+    - Se QR falhar, não usa prova/aluno base.
+    - Scan só cria pendência manual quando criar_pendencia=True.
+    - Upload usa o mesmo leitor de QR e o mesmo corretor de imagem.
+    """
+    dados_qr = ler_qrcode(str(caminho))
+
+    if not dados_qr or not dados_qr.get("prova_id") or not dados_qr.get("aluno_id"):
+        resposta = {
+            "ok": False,
+            "status": "qr_nao_lido" if criar_pendencia else "buscando_qr",
+            "mensagem": "QR Code não lido. Aproxime a folha, melhore o foco e tente novamente.",
+            "dados_qr": dados_qr or {},
+            "pendencia_id": None,
+            "pendencia_url": None,
+        }
+        if criar_pendencia:
+            pendencia_id = salvar_pendencia_identificacao(
+                conn,
+                caminho,
+                origem=origem,
+                mensagem=f"QR Code não lido no {origem}. {nome_arquivo}".strip(),
+            )
+            resposta.update({
+                "mensagem": "QR Code não lido. A folha foi enviada para Identificação Manual e nada foi salvo em aluno errado.",
+                "pendencia_id": pendencia_id,
+                "pendencia_url": url_for("resolver_identificacao_pendente", pendencia_id=pendencia_id),
+            })
+        return resposta
+
+    prova_corrigir = buscar_prova_com_aluno(conn, int(dados_qr["prova_id"]))
+    if not prova_corrigir:
+        return {
+            "ok": False,
+            "status": "qr_invalido",
+            "mensagem": "QR lido, mas a prova não existe ou pertence a outro professor. Nada foi salvo.",
+            "dados_qr": dados_qr,
+        }
+
+    gabarito_oficial = json.loads(prova_corrigir["gabarito_json"])
+    resultado = corrigir_imagem_web(
+        caminho_gabarito_aluno=str(caminho),
+        gabarito_oficial=gabarito_oficial,
+        usar_ia="auto",
+    )
+
+    if dados_qr and not resultado.get("dados_qr"):
+        resultado["dados_qr"] = dados_qr
+
+    nota = float(resultado["resultado"].get("nota_percentual") or 0)
+    processamento = resultado.get("processamento", {})
+    omr = processamento.get("omr", {}) if isinstance(processamento, dict) else {}
+    status_omr = str(omr.get("status_omr", ""))
+    confianca_baixa = status_omr in ["falha_calibracao", "sem_marcacoes_detectadas", "erro"]
+    status_leitura = "revisao" if confianca_baixa else "ok"
+    mensagem = "QR lido com sucesso."
+    if confianca_baixa:
+        mensagem = f"{mensagem} Leitura OMR precisa de revisão: {omr.get('mensagem', status_omr)}"
+
+    return {
+        "ok": True,
+        "status": status_leitura,
+        "mensagem": mensagem,
+        "dados_qr": dados_qr,
+        "prova": prova_corrigir,
+        "aluno_id": int(dados_qr["aluno_id"]),
+        "prova_id": int(prova_corrigir["id"]),
+        "nota": nota,
+        "resultado": resultado,
+    }
 
 def recalcular_sessao_scan(conn, sessao_id: int):
     linhas = conn.execute(
@@ -1606,7 +1653,6 @@ def iniciar_sessao_scan_rota():
         )
         sessao_id = cursor.lastrowid
         conn.commit()
-        reset_scan_state(sessao_id)
 
         return jsonify({
             "ok": True,
@@ -1634,7 +1680,6 @@ def finalizar_sessao_scan_rota():
         )
         resumo = recalcular_sessao_scan(conn, sessao_id)
         conn.commit()
-        limpar_scan_state(sessao_id)
         return jsonify({"ok": True, "sessao_id": sessao_id, "resumo": resumo})
     finally:
         conn.close()
@@ -1642,151 +1687,102 @@ def finalizar_sessao_scan_rota():
 
 @app.route("/scan/processar-frame", methods=["POST"])
 def processar_frame_scan_rota():
-    """Recebe um frame da câmera, corrige por OpenCV e devolve o resultado em JSON."""
+    """
+    Recebe um frame da câmera e corrige usando o MESMO pipeline do Upload.
+
+    Diferença de fluxo:
+    - Frame sem QR no Scan não cria pendência automaticamente.
+    - Só cria pendência quando o frontend enviar forcar_pendencia=True.
+    - Nunca usa prova/aluno base para salvar resultado.
+    """
     dados = request.get_json(silent=True) or {}
 
     try:
         sessao_id = int(dados.get("sessao_id") or 0)
         prova_base_id = int(dados.get("prova_id") or dados.get("prova_base_id") or 0)
     except Exception:
-        return jsonify({"ok": False, "status": "erro", "mensagem": "Sessão ou prova inválida."}), 400
+        return jsonify({"ok": False, "status": "erro", "mensagem": "Sessão ou prova inválida.", "auto_continuar": False}), 400
 
     imagem_data_url = dados.get("imagem")
-    # Quando true, o professor pediu explicitamente para mandar o frame atual
-    # para a Identificação Manual. No loop automático normal, QR falhou NÃO
-    # deve criar pendência infinita no banco.
-    forcar_pendencia = str(dados.get("forcar_pendencia") or "").lower() in ["1", "true", "sim", "yes"]
-    reset_contador = str(dados.get("reset_contador") or "").lower() in ["1", "true", "sim", "yes"]
+    forcar_pendencia = bool(dados.get("forcar_pendencia"))
     inicio = time.perf_counter()
 
     try:
         caminho = salvar_frame_base64(imagem_data_url)
     except Exception as erro:
-        return jsonify({"ok": False, "status": "erro", "mensagem": str(erro)}), 400
+        return jsonify({"ok": False, "status": "erro", "mensagem": str(erro), "auto_continuar": False}), 400
 
     conn = conectar()
     try:
-        sessao = conn.execute("SELECT * FROM sessoes_scan WHERE id = ? AND professor_id = ?", (sessao_id, int(professor_atual_id()))).fetchone()
+        sessao = conn.execute(
+            "SELECT * FROM sessoes_scan WHERE id = ? AND professor_id = ?",
+            (sessao_id, int(professor_atual_id())),
+        ).fetchone()
         if not sessao or sessao["status"] != "aberta":
-            return jsonify({"ok": False, "status": "erro", "mensagem": "Sessão de Scan não está aberta."}), 400
+            return jsonify({"ok": False, "status": "erro", "mensagem": "Sessão de Scan não está aberta.", "auto_continuar": False}), 400
 
-        estado_scan = scan_state(sessao_id)
-        agora_ts = time.perf_counter()
-        if reset_contador:
-            reset_scan_state(sessao_id)
-            estado_scan = scan_state(sessao_id)
-
-        # Trava defensiva contra loop infinito: se o frontend antigo continuar
-        # chamando a rota sem parar, o backend passa a responder pausado.
-        if estado_scan.get("paused") and not forcar_pendencia:
-            try:
-                Path(caminho).unlink(missing_ok=True)
-            except Exception:
-                pass
-            return jsonify({
-                "ok": False,
-                "status": "scan_pausado",
-                "mensagem": "Scan pausado automaticamente para evitar análise infinita de frames. Ajuste a folha e clique em Retomar automático.",
-                "auto_continuar": False,
-                "latencia_ms": round((time.perf_counter() - inicio) * 1000, 2),
-                "resumo": recalcular_sessao_scan(conn, sessao_id),
-            }), 200
-
-        intervalo = agora_ts - float(estado_scan.get("last_request_ts") or 0.0)
-        estado_scan["last_request_ts"] = agora_ts
-        if intervalo < SCAN_MIN_INTERVAL_SECONDS and not forcar_pendencia:
-            try:
-                Path(caminho).unlink(missing_ok=True)
-            except Exception:
-                pass
-            return jsonify({
-                "ok": False,
-                "status": "aguardando_intervalo",
-                "mensagem": "Aguardando intervalo mínimo entre frames.",
-                "auto_continuar": True,
-                "latencia_ms": round((time.perf_counter() - inicio) * 1000, 2),
-                "resumo": recalcular_sessao_scan(conn, sessao_id),
-            }), 200
-
+        # A prova base existe apenas para abrir a sessão. Ela NÃO é fallback de identificação.
         prova_base = buscar_prova_com_aluno(conn, prova_base_id)
         if not prova_base:
-            return jsonify({"ok": False, "status": "erro", "mensagem": "Prova base não encontrada."}), 404
+            return jsonify({"ok": False, "status": "erro", "mensagem": "Prova base não encontrada.", "auto_continuar": False}), 404
 
-        dados_qr = ler_qrcode(str(caminho))
+        pipeline = corrigir_folha_por_pipeline_unico(
+            conn,
+            caminho,
+            origem="scan",
+            criar_pendencia=forcar_pendencia,
+            nome_arquivo="frame da câmera",
+        )
 
-        # REGRA DE SEGURANÇA: QR falhou = não salva nota automaticamente.
-        # Isso impede o bug de registrar a nota no aluno da prova base.
-        if not dados_qr or not dados_qr.get("prova_id") or not dados_qr.get("aluno_id"):
-            latencia_ms = round((time.perf_counter() - inicio) * 1000, 2)
+        latencia_ms = round((time.perf_counter() - inicio) * 1000, 2)
 
-            # No loop automático, NÃO salvamos uma pendência a cada frame.
-            # Isso corrigia o problema de "análise infinita" gerando várias
-            # entradas repetidas no banco e deixando o Scan preso.
-            if not forcar_pendencia:
-                estado_scan["qr_fails"] = int(estado_scan.get("qr_fails") or 0) + 1
-                pausou = estado_scan["qr_fails"] >= SCAN_MAX_QR_FAILS_BACKEND
-                if pausou:
-                    estado_scan["paused"] = True
-                try:
-                    Path(caminho).unlink(missing_ok=True)
-                except Exception:
-                    pass
+        if not pipeline.get("ok"):
+            if forcar_pendencia:
+                conn.commit()
+
+            resumo = recalcular_sessao_scan(conn, sessao_id)
+            status = pipeline.get("status") or "erro"
+            mensagem = pipeline.get("mensagem") or "Não foi possível corrigir."
+
+            # Frame comum sem QR: devolve apenas orientação ao frontend; não cria lixo no banco.
+            if status == "buscando_qr":
+                mensagem = "QR não encontrado neste frame. Aproxime o QR da câmera, melhore o foco e tente novamente."
+
+            return jsonify({
+                "ok": False,
+                "status": status,
+                "mensagem": mensagem,
+                "auto_continuar": False,
+                "salvar_automaticamente": False,
+                "pendencia_id": pipeline.get("pendencia_id"),
+                "pendencia_url": pipeline.get("pendencia_url"),
+                "latencia_ms": latencia_ms,
+                "resumo": resumo,
+            }), 200
+
+        prova_corrigir = pipeline["prova"]
+        aluno_id = int(pipeline["aluno_id"])
+        prova_id = int(pipeline["prova_id"])
+        resultado = pipeline["resultado"]
+        nota = float(pipeline["nota"])
+        status_leitura = pipeline.get("status") or "ok"
+        mensagem = pipeline.get("mensagem") or "QR lido com sucesso."
+
+        # Segurança extra: o QR deve apontar para o mesmo aluno ligado à folha/prova no banco.
+        try:
+            if int(prova_corrigir["aluno_id"]) != aluno_id:
                 return jsonify({
                     "ok": False,
-                    "status": "scan_pausado" if pausou else "buscando_qr",
-                    "mensagem": (
-                        "Scan pausado automaticamente para evitar análise infinita. Ajuste a folha e clique em Retomar automático."
-                        if pausou else
-                        "QR Code ainda não lido. Ajuste distância, foco e iluminação."
-                    ),
-                    "salvou_pendencia": False,
-                    "auto_continuar": False if pausou else True,
-                    "falhas_qr": estado_scan["qr_fails"],
-                    "max_falhas_qr": SCAN_MAX_QR_FAILS_BACKEND,
+                    "status": "qr_invalido",
+                    "mensagem": "QR lido, mas o aluno do QR não bate com a folha registrada no banco. Nada foi salvo.",
+                    "auto_continuar": False,
+                    "salvar_automaticamente": False,
                     "latencia_ms": latencia_ms,
                     "resumo": recalcular_sessao_scan(conn, sessao_id),
                 }), 200
+        except Exception:
+            pass
 
-            # Só cai aqui quando o professor clicar em Identificação Manual.
-            pendencia_id = salvar_pendencia_identificacao(
-                conn,
-                caminho,
-                origem="scan",
-                mensagem="QR Code não lido durante o Scan. Identificação manual solicitada pelo professor.",
-            )
-            conn.commit()
-            return jsonify({
-                "ok": False,
-                "status": "qr_nao_lido_pendente",
-                "mensagem": "QR Code não lido. Frame enviado para Identificação Manual. Nada foi salvo em aluno errado.",
-                "salvou_pendencia": True,
-                "pendencia_id": pendencia_id,
-                "pendencia_url": url_for("resolver_identificacao_pendente", pendencia_id=pendencia_id),
-                "auto_continuar": False,
-                "latencia_ms": latencia_ms,
-                "resumo": recalcular_sessao_scan(conn, sessao_id),
-            }), 200
-
-        # QR lido: limpa contador de falhas do Scan.
-        estado_scan["qr_fails"] = 0
-        estado_scan["paused"] = False
-
-        prova_corrigir = buscar_prova_com_aluno(conn, int(dados_qr["prova_id"]))
-        if not prova_corrigir:
-            latencia_ms = round((time.perf_counter() - inicio) * 1000, 2)
-            return jsonify({
-                "ok": False,
-                "status": "qr_invalido",
-                "mensagem": "QR lido, mas a prova não existe ou pertence a outro professor. Nada foi salvo.",
-                "latencia_ms": latencia_ms,
-                "resumo": recalcular_sessao_scan(conn, sessao_id),
-            }), 200
-
-        aluno_id = int(dados_qr["aluno_id"])
-        prova_id = int(prova_corrigir["id"])
-        mensagem_qr = "QR lido com sucesso."
-
-        # Evita salvar a mesma folha repetidamente durante uma sessão em lote.
         leitura_existente = conn.execute(
             """
             SELECT leituras_scan.*, resultados.nota_percentual
@@ -1806,40 +1802,20 @@ def processar_frame_scan_rota():
                 "ok": True,
                 "status": "duplicado",
                 "mensagem": "Esta folha já foi lida nesta sessão. Mostre outra folha para continuar.",
+                "auto_continuar": False,
                 "aluno": prova_corrigir["aluno_nome"],
                 "prova": prova_corrigir["titulo"],
                 "nota_percentual": leitura_existente["nota_percentual"],
-                "latencia_ms": round((time.perf_counter() - inicio) * 1000, 2),
+                "latencia_ms": latencia_ms,
                 "resumo": resumo,
             })
 
-        gabarito_oficial = json.loads(prova_corrigir["gabarito_json"])
-        resultado = corrigir_imagem_web(
-            caminho_gabarito_aluno=str(caminho),
-            gabarito_oficial=gabarito_oficial,
-            usar_ia=False,
-        )
-        if dados_qr and not resultado.get("dados_qr"):
-            resultado["dados_qr"] = dados_qr
-
-        nota = float(resultado["resultado"]["nota_percentual"])
-        processamento = resultado.get("processamento", {})
-        omr = processamento.get("omr", {}) if isinstance(processamento, dict) else {}
-        status_omr = omr.get("status_omr", "")
-        confianca_baixa = status_omr in ["falha_calibracao", "sem_marcacoes_detectadas", "erro"]
-        sem_qr = False
-
-        status_leitura = "revisao" if confianca_baixa or sem_qr else "ok"
-        mensagem = mensagem_qr
-        if confianca_baixa:
-            mensagem = f"{mensagem} Leitura OMR precisa de revisão: {omr.get('mensagem', status_omr)}"
-
-        latencia_ms = round((time.perf_counter() - inicio) * 1000, 2)
         resultado.setdefault("processamento", {})["scan"] = {
             "sessao_id": sessao_id,
             "latencia_ms": latencia_ms,
             "status_scan": status_leitura,
             "mensagem_scan": mensagem,
+            "pipeline": "upload_unificado",
         }
 
         cursor = conn.execute(
@@ -1885,6 +1861,7 @@ def processar_frame_scan_rota():
             "ok": True,
             "status": status_leitura,
             "mensagem": mensagem,
+            "auto_continuar": False,
             "sessao_id": sessao_id,
             "resultado_id": resultado_id,
             "aluno": prova_corrigir["aluno_nome"],
@@ -1904,6 +1881,7 @@ def processar_frame_scan_rota():
             "ok": False,
             "status": "erro",
             "mensagem": f"Erro ao processar o frame: {erro}",
+            "auto_continuar": False,
             "latencia_ms": round((time.perf_counter() - inicio) * 1000, 2),
         }), 500
     finally:
@@ -2214,50 +2192,32 @@ def corrigir():
             continue
 
         for caminho in imagens_para_corrigir:
-            dados_qr = ler_qrcode(str(caminho))
+            pipeline = corrigir_folha_por_pipeline_unico(
+                conn,
+                caminho,
+                origem="upload",
+                criar_pendencia=True,
+                nome_arquivo=arquivo.filename,
+            )
 
-            # REGRA DE SEGURANÇA: não corrigir upload por prova base quando o QR falhar.
-            # Isso evita nota no aluno errado.
-            if not dados_qr or not dados_qr.get("prova_id") or not dados_qr.get("aluno_id"):
-                pendencia_id = salvar_pendencia_identificacao(
-                    conn,
-                    caminho,
-                    origem="upload",
-                    mensagem=f"QR Code não lido no arquivo {arquivo.filename}.",
-                )
-                avisos.append(
-                    f"Não consegui ler o QR de {arquivo.filename}. A folha foi enviada para Identificação Manual #{pendencia_id} e NÃO foi salva em aluno errado."
-                )
+            if not pipeline.get("ok"):
+                status = pipeline.get("status") or "erro"
+                if status == "qr_nao_lido":
+                    avisos.append(
+                        f"Não consegui ler o QR de {arquivo.filename}. A folha foi enviada para Identificação Manual #{pipeline.get('pendencia_id')} e NÃO foi salva em aluno errado."
+                    )
+                elif status == "qr_invalido":
+                    avisos.append(
+                        f"QR de {arquivo.filename} apontou para uma prova inexistente ou de outro professor. A folha NÃO foi salva."
+                    )
+                else:
+                    avisos.append(pipeline.get("mensagem") or f"Não foi possível corrigir {arquivo.filename}.")
                 continue
 
-            prova_corrigir = conn.execute(
-                "SELECT * FROM provas WHERE id = ? AND professor_id = ?",
-                (int(dados_qr["prova_id"]), int(professor_atual_id()))
-            ).fetchone()
-
-            if not prova_corrigir:
-                avisos.append(
-                    f"QR de {arquivo.filename} apontou para uma prova inexistente ou de outro professor. A folha NÃO foi salva."
-                )
-                continue
-
-            gabarito_oficial = json.loads(prova_corrigir["gabarito_json"])
-
-            try:
-                resultado = corrigir_imagem_web(
-                    caminho_gabarito_aluno=str(caminho),
-                    gabarito_oficial=gabarito_oficial,
-                )
-            except Exception as erro:
-                avisos.append(f"Erro ao corrigir {arquivo.filename}: {erro}")
-                continue
-
-            # Mantém o QR pré-lido no resultado para facilitar debug, mesmo quando o corretor não reler o QR.
-            if dados_qr and not resultado.get("dados_qr"):
-                resultado["dados_qr"] = dados_qr
-
-            aluno_id = int(dados_qr["aluno_id"])
-            nota = resultado["resultado"]["nota_percentual"]
+            resultado = pipeline["resultado"]
+            aluno_id = int(pipeline["aluno_id"])
+            prova_id = int(pipeline["prova_id"])
+            nota = float(pipeline["nota"])
 
             conn.execute(
                 """
@@ -2267,10 +2227,10 @@ def corrigir():
                 (
                     int(professor_atual_id()),
                     aluno_id,
-                    prova_corrigir["id"],
+                    prova_id,
                     nota,
                     json.dumps(resultado, ensure_ascii=False),
-                    "confiavel" if resultado["resultado"].get("anuladas_ou_em_branco", 0) == 0 else "revisao",
+                    pipeline.get("status") or "confiavel",
                     datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 ),
             )
