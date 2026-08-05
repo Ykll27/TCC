@@ -35,6 +35,36 @@ app.config["MAX_CONTENT_LENGTH"] = 60 * 1024 * 1024
 iniciar_banco()
 
 
+# Estado leve em memória para proteger o Scan contra loop infinito.
+# No Render usamos 1 worker no Procfile; mesmo assim, a trava principal
+# também fica no frontend. Esse dicionário evita abuso/requisições repetidas
+# quando o navegador mantém a tela aberta sem QR visível.
+SCAN_RUNTIME_STATE = {}
+SCAN_MAX_QR_FAILS_BACKEND = 5
+SCAN_MIN_INTERVAL_SECONDS = 0.22
+
+
+def scan_state(sessao_id: int) -> dict:
+    estado = SCAN_RUNTIME_STATE.setdefault(int(sessao_id), {
+        "qr_fails": 0,
+        "last_request_ts": 0.0,
+        "paused": False,
+    })
+    return estado
+
+
+def reset_scan_state(sessao_id: int):
+    SCAN_RUNTIME_STATE[int(sessao_id)] = {
+        "qr_fails": 0,
+        "last_request_ts": 0.0,
+        "paused": False,
+    }
+
+
+def limpar_scan_state(sessao_id: int):
+    SCAN_RUNTIME_STATE.pop(int(sessao_id), None)
+
+
 def professor_atual_id():
     return session.get("professor_id")
 
@@ -1576,6 +1606,7 @@ def iniciar_sessao_scan_rota():
         )
         sessao_id = cursor.lastrowid
         conn.commit()
+        reset_scan_state(sessao_id)
 
         return jsonify({
             "ok": True,
@@ -1603,6 +1634,7 @@ def finalizar_sessao_scan_rota():
         )
         resumo = recalcular_sessao_scan(conn, sessao_id)
         conn.commit()
+        limpar_scan_state(sessao_id)
         return jsonify({"ok": True, "sessao_id": sessao_id, "resumo": resumo})
     finally:
         conn.close()
@@ -1624,6 +1656,7 @@ def processar_frame_scan_rota():
     # para a Identificação Manual. No loop automático normal, QR falhou NÃO
     # deve criar pendência infinita no banco.
     forcar_pendencia = str(dados.get("forcar_pendencia") or "").lower() in ["1", "true", "sim", "yes"]
+    reset_contador = str(dados.get("reset_contador") or "").lower() in ["1", "true", "sim", "yes"]
     inicio = time.perf_counter()
 
     try:
@@ -1636,6 +1669,44 @@ def processar_frame_scan_rota():
         sessao = conn.execute("SELECT * FROM sessoes_scan WHERE id = ? AND professor_id = ?", (sessao_id, int(professor_atual_id()))).fetchone()
         if not sessao or sessao["status"] != "aberta":
             return jsonify({"ok": False, "status": "erro", "mensagem": "Sessão de Scan não está aberta."}), 400
+
+        estado_scan = scan_state(sessao_id)
+        agora_ts = time.perf_counter()
+        if reset_contador:
+            reset_scan_state(sessao_id)
+            estado_scan = scan_state(sessao_id)
+
+        # Trava defensiva contra loop infinito: se o frontend antigo continuar
+        # chamando a rota sem parar, o backend passa a responder pausado.
+        if estado_scan.get("paused") and not forcar_pendencia:
+            try:
+                Path(caminho).unlink(missing_ok=True)
+            except Exception:
+                pass
+            return jsonify({
+                "ok": False,
+                "status": "scan_pausado",
+                "mensagem": "Scan pausado automaticamente para evitar análise infinita de frames. Ajuste a folha e clique em Retomar automático.",
+                "auto_continuar": False,
+                "latencia_ms": round((time.perf_counter() - inicio) * 1000, 2),
+                "resumo": recalcular_sessao_scan(conn, sessao_id),
+            }), 200
+
+        intervalo = agora_ts - float(estado_scan.get("last_request_ts") or 0.0)
+        estado_scan["last_request_ts"] = agora_ts
+        if intervalo < SCAN_MIN_INTERVAL_SECONDS and not forcar_pendencia:
+            try:
+                Path(caminho).unlink(missing_ok=True)
+            except Exception:
+                pass
+            return jsonify({
+                "ok": False,
+                "status": "aguardando_intervalo",
+                "mensagem": "Aguardando intervalo mínimo entre frames.",
+                "auto_continuar": True,
+                "latencia_ms": round((time.perf_counter() - inicio) * 1000, 2),
+                "resumo": recalcular_sessao_scan(conn, sessao_id),
+            }), 200
 
         prova_base = buscar_prova_com_aluno(conn, prova_base_id)
         if not prova_base:
@@ -1652,16 +1723,26 @@ def processar_frame_scan_rota():
             # Isso corrigia o problema de "análise infinita" gerando várias
             # entradas repetidas no banco e deixando o Scan preso.
             if not forcar_pendencia:
+                estado_scan["qr_fails"] = int(estado_scan.get("qr_fails") or 0) + 1
+                pausou = estado_scan["qr_fails"] >= SCAN_MAX_QR_FAILS_BACKEND
+                if pausou:
+                    estado_scan["paused"] = True
                 try:
                     Path(caminho).unlink(missing_ok=True)
                 except Exception:
                     pass
                 return jsonify({
                     "ok": False,
-                    "status": "buscando_qr",
-                    "mensagem": "QR Code ainda não lido. Ajuste distância, foco e iluminação.",
+                    "status": "scan_pausado" if pausou else "buscando_qr",
+                    "mensagem": (
+                        "Scan pausado automaticamente para evitar análise infinita. Ajuste a folha e clique em Retomar automático."
+                        if pausou else
+                        "QR Code ainda não lido. Ajuste distância, foco e iluminação."
+                    ),
                     "salvou_pendencia": False,
-                    "auto_continuar": True,
+                    "auto_continuar": False if pausou else True,
+                    "falhas_qr": estado_scan["qr_fails"],
+                    "max_falhas_qr": SCAN_MAX_QR_FAILS_BACKEND,
                     "latencia_ms": latencia_ms,
                     "resumo": recalcular_sessao_scan(conn, sessao_id),
                 }), 200
@@ -1685,6 +1766,10 @@ def processar_frame_scan_rota():
                 "latencia_ms": latencia_ms,
                 "resumo": recalcular_sessao_scan(conn, sessao_id),
             }), 200
+
+        # QR lido: limpa contador de falhas do Scan.
+        estado_scan["qr_fails"] = 0
+        estado_scan["paused"] = False
 
         prova_corrigir = buscar_prova_com_aluno(conn, int(dados_qr["prova_id"]))
         if not prova_corrigir:

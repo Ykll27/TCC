@@ -46,45 +46,401 @@
 {% endblock %}
 {% block scripts %}
 <script>
-let streamScan=null;
-let sessaoId=null;
-let autoAtivo=false;
-let emProcessamento=false;
-let loopTimer=null;
-let leituras=[];
-let falhasQrSeguidas=0;
-let ultimoFrameDataUrl='';
-let ultimoStatus='';
-const MAX_FALHAS_QR=8;
-const DELAY_BUSCA=650;
-const DELAY_APOS_SUCESSO=1600;
-const DELAY_APOS_DUPLICADO=1300;
-const DELAY_APOS_ERRO=950;
-const video=document.getElementById('videoScan'),canvas=document.getElementById('canvasScan'),guide=document.getElementById('scanGuide'),statusScan=document.getElementById('statusScan'),badgeSessao=document.getElementById('badgeSessao'),btnIniciar=document.getElementById('btnIniciar'),btnAnalisar=document.getElementById('btnAnalisar'),btnPausar=document.getElementById('btnPausar'),btnIdentificarManual=document.getElementById('btnIdentificarManual'),btnFinalizar=document.getElementById('btnFinalizar'),boxPausaQr=document.getElementById('boxPausaQr');
-function setStatus(msg,tipo='secondary'){statusScan.className=`alert alert-${tipo}`;statusScan.innerHTML=msg}
-function setGuide(tipo){guide.className='scan-guide'+(tipo?` ${tipo}`:'')}
-function setBoxPausa(visivel){if(boxPausaQr)boxPausaQr.classList.toggle('d-none',!visivel)}
-function beep(tipo='ok'){try{const Ctx=window.AudioContext||window.webkitAudioContext;const ctx=new Ctx();const osc=ctx.createOscillator();const gain=ctx.createGain();osc.connect(gain);gain.connect(ctx.destination);osc.frequency.value=tipo==='ok'?880:280;gain.gain.value=.06;osc.start();setTimeout(()=>{osc.stop();ctx.close()},tipo==='ok'?120:220)}catch(e){}}
-function vibrar(tipo='ok'){if(navigator.vibrate)navigator.vibrate(tipo==='ok'?80:[80,60,80])}
-function atualizarResumo(resumo){if(!resumo)return;document.getElementById('totalProcessados').textContent=resumo.total_processados??0;document.getElementById('totalSucesso').textContent=resumo.total_sucesso??0;document.getElementById('totalRevisao').textContent=resumo.total_revisao??0;document.getElementById('mediaLatencia').textContent=resumo.tempo_medio_ms?Math.round(resumo.tempo_medio_ms):'--'}
-function adicionarLeitura(resp){if(!['ok','revisao'].includes(resp.status))return;leituras.unshift(resp);leituras=leituras.slice(0,8);document.getElementById('listaLeituras').innerHTML=leituras.map(r=>{const classe=r.status==='ok'?'ok':'revisao';const badge=r.status==='ok'?'text-bg-success':'text-bg-warning';return `<div class="reading-item ${classe} bg-light rounded p-2"><div class="d-flex justify-content-between gap-2"><strong>${r.aluno||'Aluno'}</strong><span class="badge ${badge}">${r.status}</span></div><div class="small-muted">${r.prova||'Prova'}</div><div class="small">Nota: <strong>${r.nota_percentual??'--'}%</strong> · Tempo: <strong>${Math.round(r.latencia_ms||0)} ms</strong></div></div>`}).join('')}
-async function abrirCameraScan(){if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)throw new Error('Navegador sem suporte a câmera.');if(!window.isSecureContext&&location.hostname!=='localhost'&&location.hostname!=='127.0.0.1')throw new Error('A câmera exige HTTPS ou localhost.');streamScan=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},audio:false});video.srcObject=streamScan}
-function limparTimer(){if(loopTimer){clearTimeout(loopTimer);loopTimer=null}}
-function pararCameraScan(){autoAtivo=false;limparTimer();if(streamScan){streamScan.getTracks().forEach(t=>{try{t.stop()}catch(e){}})}streamScan=null;if(video)video.srcObject=null}
-function finalizarSessaoSilenciosa(){if(!sessaoId)return;try{const dados=JSON.stringify({sessao_id:sessaoId}); if(navigator.sendBeacon){navigator.sendBeacon("{{ url_for('finalizar_sessao_scan_rota') }}", new Blob([dados],{type:'application/json'}));}else{fetch("{{ url_for('finalizar_sessao_scan_rota') }}",{method:'POST',headers:{'Content-Type':'application/json'},body:dados,keepalive:true});}}catch(e){} }
-function desligarAoSair(){finalizarSessaoSilenciosa();pararCameraScan()}
-function capturarFrameDataUrl(){if(!video.videoWidth||!video.videoHeight)throw new Error('A câmera ainda não carregou.');const maxWidth=1600,escala=Math.min(1,maxWidth/video.videoWidth);canvas.width=Math.round(video.videoWidth*escala);canvas.height=Math.round(video.videoHeight*escala);canvas.getContext('2d').drawImage(video,0,0,canvas.width,canvas.height);ultimoFrameDataUrl=canvas.toDataURL('image/jpeg',.94);if(btnIdentificarManual)btnIdentificarManual.disabled=false;return ultimoFrameDataUrl}
-function agendarProximaAnalise(delay=DELAY_BUSCA){limparTimer();if(!autoAtivo||!sessaoId)return;loopTimer=setTimeout(()=>{analisarFrame(false)},delay)}
-async function iniciarSessao(){try{setStatus('Abrindo câmera e iniciando sessão...');await abrirCameraScan();const provaEl=document.getElementById('provaBase');const modoEl=document.getElementById('modoScan');if(!provaEl)throw new Error('Nenhuma prova disponível para iniciar o Scan.');const provaId=provaEl.value,modo=modoEl.value;const resp=await fetch("{{ url_for('iniciar_sessao_scan_rota') }}",{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prova_id:provaId,modo})});const dados=await resp.json();if(!dados.ok)throw new Error(dados.mensagem||'Falha ao iniciar.');sessaoId=dados.sessao_id;autoAtivo=true;falhasQrSeguidas=0;setBoxPausa(false);badgeSessao.className='badge text-bg-success fs-6';badgeSessao.textContent=`Sessão #${sessaoId} - ${modo}`;btnIniciar.disabled=true;btnAnalisar.disabled=false;btnPausar.disabled=false;btnFinalizar.disabled=false;if(btnIdentificarManual)btnIdentificarManual.disabled=true;setStatus('Sessão iniciada. Aponte a folha dentro da moldura.','info');agendarProximaAnalise(450)}catch(erro){setStatus(erro.message||'Erro ao iniciar Scan.','danger');pararCameraScan();console.error(erro)}}
-function atualizarTimerLatencia(latencia){document.getElementById('ultimaLatencia').textContent=latencia;document.getElementById('ultimaLatencia').className=latencia>=1500?'big-number latency-warn':'big-number latency-ok';document.getElementById('alertaLentidao').className=latencia>=1500?'alert alert-danger mt-3 mb-0 small':'alert alert-light border mt-3 mb-0 small';document.getElementById('alertaLentidao').textContent=latencia>=1500?'Leitura lenta. Melhore a luz ou aproxime a folha.':'Tempo dentro do esperado.'}
-async function analisarFrame(forcarPendencia=false){if(!sessaoId||emProcessamento)return;emProcessamento=true;limparTimer();const inicioLocal=performance.now();let proximoDelay=DELAY_BUSCA;try{setGuide('');if(!forcarPendencia)setStatus(`Analisando frame... Tentativa QR ${falhasQrSeguidas+1}/${MAX_FALHAS_QR}`);const imagem=capturarFrameDataUrl(),provaId=document.getElementById('provaBase').value;const resp=await fetch("{{ url_for('processar_frame_scan_rota') }}",{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessao_id:sessaoId,prova_id:provaId,imagem,forcar_pendencia:forcarPendencia})});const dados=await resp.json();ultimoStatus=dados.status||'';const latencia=Math.round(dados.latencia_ms||performance.now()-inicioLocal);atualizarTimerLatencia(latencia);atualizarResumo(dados.resumo);if(!dados.ok){if(dados.status==='buscando_qr'){falhasQrSeguidas++;setGuide('warn');if(falhasQrSeguidas>=MAX_FALHAS_QR){autoAtivo=false;setBoxPausa(true);if(btnPausar)btnPausar.textContent='Retomar automático';setStatus('QR não encontrado após várias tentativas. O automático foi pausado para não ficar analisando frame infinito. Ajuste a folha e retome, ou envie para identificação manual.','warning');return}else{setStatus(`QR ainda não lido. Ajuste distância/foco/luz. Tentativa ${falhasQrSeguidas}/${MAX_FALHAS_QR}.`,'warning');proximoDelay=DELAY_BUSCA;return}}if(dados.status==='qr_nao_lido_pendente'){autoAtivo=false;setBoxPausa(false);const link=dados.pendencia_url?` <a class="alert-link" href="${dados.pendencia_url}">Abrir identificação manual</a>`:'';setGuide('warn');setStatus((dados.mensagem||'Frame enviado para identificação manual.')+link,'warning');return}falhasQrSeguidas++;setGuide('err');setStatus(dados.mensagem||'Não foi possível corrigir.','danger');if(falhasQrSeguidas>=MAX_FALHAS_QR){autoAtivo=false;if(btnPausar)btnPausar.textContent='Retomar automático';setBoxPausa(true);return}proximoDelay=DELAY_APOS_ERRO;return}
-falhasQrSeguidas=0;setBoxPausa(false);adicionarLeitura(dados);if(dados.status==='ok'){setGuide('ok');setStatus(`${dados.aluno}: ${dados.nota_percentual}% (${dados.acertos}/${dados.total_questoes}) · ${latencia} ms`,'success');beep('ok');vibrar('ok');proximoDelay=DELAY_APOS_SUCESSO;if(document.getElementById('modoScan').value==='individual'){autoAtivo=false;if(btnPausar)btnPausar.textContent='Retomar automático';return}}else if(dados.status==='duplicado'){setGuide('warn');setStatus(dados.mensagem||'Folha duplicada. Mostre outra folha.','secondary');proximoDelay=DELAY_APOS_DUPLICADO}else{setGuide('warn');setStatus(`${dados.aluno||'Folha'}: precisa revisar. ${dados.mensagem||''}`,'warning');beep('erro');vibrar('erro');proximoDelay=DELAY_APOS_SUCESSO}}catch(erro){falhasQrSeguidas++;setGuide('err');setStatus(erro.message||'Erro no Scan.','danger');console.error(erro);proximoDelay=DELAY_APOS_ERRO}finally{emProcessamento=false;if(autoAtivo)agendarProximaAnalise(proximoDelay)}}
-async function finalizarSessao(){if(!sessaoId){pararCameraScan();return}autoAtivo=false;limparTimer();const id=sessaoId;try{await fetch("{{ url_for('finalizar_sessao_scan_rota') }}",{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessao_id:sessaoId})})}catch(e){}sessaoId=null;pararCameraScan();window.location.href="{{ url_for('resumo_sessao_scan_rota', sessao_id=0) }}".replace('0',String(id))}
-if(btnIniciar)btnIniciar.addEventListener('click',iniciarSessao);
-if(btnAnalisar)btnAnalisar.addEventListener('click',()=>analisarFrame(false));
-if(btnIdentificarManual)btnIdentificarManual.addEventListener('click',()=>{autoAtivo=false;setBoxPausa(false);analisarFrame(true)});
-if(btnPausar)btnPausar.addEventListener('click',()=>{autoAtivo=!autoAtivo;btnPausar.textContent=autoAtivo?'Pausar automático':'Retomar automático';setBoxPausa(false);if(autoAtivo){falhasQrSeguidas=0;setStatus('Leitura automática retomada.','info');agendarProximaAnalise(350)}else{limparTimer();setStatus('Leitura automática pausada.','info')}});
-if(btnFinalizar)btnFinalizar.addEventListener('click',finalizarSessao);
-window.addEventListener('beforeunload',desligarAoSair);window.addEventListener('pagehide',desligarAoSair);document.addEventListener('visibilitychange',()=>{if(document.hidden)pararCameraScan()});
+let streamScan = null;
+let sessaoId = null;
+let autoAtivo = false;
+let emProcessamento = false;
+let loopTimer = null;
+let leituras = [];
+let falhasQrSeguidas = 0;
+let framesNoCiclo = 0;
+let ultimoFrameDataUrl = '';
+let ultimoStatus = '';
+
+// CORREÇÃO DO LOOP INFINITO:
+// O automático agora funciona em "rajadas" curtas. Ele NUNCA fica analisando
+// para sempre. Depois de algumas tentativas sem QR, duplicata, revisão ou
+// sucesso, ele pausa e espera o professor retomar manualmente.
+const MAX_FALHAS_QR = 4;
+const MAX_FRAMES_POR_CICLO = 5;
+const DELAY_BUSCA = 380;
+const DELAY_APOS_ERRO = 650;
+
+const video = document.getElementById('videoScan');
+const canvas = document.getElementById('canvasScan');
+const guide = document.getElementById('scanGuide');
+const statusScan = document.getElementById('statusScan');
+const badgeSessao = document.getElementById('badgeSessao');
+const btnIniciar = document.getElementById('btnIniciar');
+const btnAnalisar = document.getElementById('btnAnalisar');
+const btnPausar = document.getElementById('btnPausar');
+const btnIdentificarManual = document.getElementById('btnIdentificarManual');
+const btnFinalizar = document.getElementById('btnFinalizar');
+const boxPausaQr = document.getElementById('boxPausaQr');
+
+function setStatus(msg, tipo = 'secondary') {
+  statusScan.className = `alert alert-${tipo}`;
+  statusScan.innerHTML = msg;
+}
+
+function setGuide(tipo) {
+  guide.className = 'scan-guide' + (tipo ? ` ${tipo}` : '');
+}
+
+function setBoxPausa(visivel) {
+  if (boxPausaQr) boxPausaQr.classList.toggle('d-none', !visivel);
+}
+
+function beep(tipo = 'ok') {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    const ctx = new Ctx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.value = tipo === 'ok' ? 880 : 280;
+    gain.gain.value = 0.06;
+    osc.start();
+    setTimeout(() => { osc.stop(); ctx.close(); }, tipo === 'ok' ? 120 : 220);
+  } catch (e) {}
+}
+
+function vibrar(tipo = 'ok') {
+  if (navigator.vibrate) navigator.vibrate(tipo === 'ok' ? 80 : [80, 60, 80]);
+}
+
+function atualizarResumo(resumo) {
+  if (!resumo) return;
+  document.getElementById('totalProcessados').textContent = resumo.total_processados ?? 0;
+  document.getElementById('totalSucesso').textContent = resumo.total_sucesso ?? 0;
+  document.getElementById('totalRevisao').textContent = resumo.total_revisao ?? 0;
+  document.getElementById('mediaLatencia').textContent = resumo.tempo_medio_ms ? Math.round(resumo.tempo_medio_ms) : '--';
+}
+
+function adicionarLeitura(resp) {
+  if (!['ok', 'revisao'].includes(resp.status)) return;
+  leituras.unshift(resp);
+  leituras = leituras.slice(0, 8);
+  document.getElementById('listaLeituras').innerHTML = leituras.map(r => {
+    const classe = r.status === 'ok' ? 'ok' : 'revisao';
+    const badge = r.status === 'ok' ? 'text-bg-success' : 'text-bg-warning';
+    return `<div class="reading-item ${classe} bg-light rounded p-2">
+      <div class="d-flex justify-content-between gap-2"><strong>${r.aluno || 'Aluno'}</strong><span class="badge ${badge}">${r.status}</span></div>
+      <div class="small-muted">${r.prova || 'Prova'}</div>
+      <div class="small">Nota: <strong>${r.nota_percentual ?? '--'}%</strong> · Tempo: <strong>${Math.round(r.latencia_ms || 0)} ms</strong></div>
+    </div>`;
+  }).join('');
+}
+
+async function abrirCameraScan() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    throw new Error('Navegador sem suporte a câmera.');
+  }
+  if (!window.isSecureContext && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+    throw new Error('A câmera exige HTTPS ou localhost.');
+  }
+  streamScan = await navigator.mediaDevices.getUserMedia({
+    video: {
+      facingMode: { ideal: 'environment' },
+      width: { ideal: 1920 },
+      height: { ideal: 1080 }
+    },
+    audio: false
+  });
+  video.srcObject = streamScan;
+}
+
+function limparTimer() {
+  if (loopTimer) {
+    clearTimeout(loopTimer);
+    loopTimer = null;
+  }
+}
+
+function pararCameraScan() {
+  autoAtivo = false;
+  limparTimer();
+  if (streamScan) {
+    streamScan.getTracks().forEach(t => { try { t.stop(); } catch (e) {} });
+  }
+  streamScan = null;
+  if (video) video.srcObject = null;
+}
+
+function pausarAutomatico(mensagem, tipo = 'warning') {
+  autoAtivo = false;
+  limparTimer();
+  setBoxPausa(true);
+  if (btnPausar) btnPausar.textContent = 'Retomar automático';
+  if (mensagem) setStatus(mensagem, tipo);
+}
+
+function finalizarSessaoSilenciosa() {
+  if (!sessaoId) return;
+  try {
+    const dados = JSON.stringify({ sessao_id: sessaoId });
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon("{{ url_for('finalizar_sessao_scan_rota') }}", new Blob([dados], { type: 'application/json' }));
+    } else {
+      fetch("{{ url_for('finalizar_sessao_scan_rota') }}", {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: dados,
+        keepalive: true
+      });
+    }
+  } catch (e) {}
+}
+
+function desligarAoSair() {
+  finalizarSessaoSilenciosa();
+  pararCameraScan();
+}
+
+function capturarFrameDataUrl() {
+  if (!video.videoWidth || !video.videoHeight) throw new Error('A câmera ainda não carregou.');
+  const maxWidth = 1920;
+  const escala = Math.min(1, maxWidth / video.videoWidth);
+  canvas.width = Math.round(video.videoWidth * escala);
+  canvas.height = Math.round(video.videoHeight * escala);
+  canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+  ultimoFrameDataUrl = canvas.toDataURL('image/jpeg', 0.96);
+  if (btnIdentificarManual) btnIdentificarManual.disabled = false;
+  return ultimoFrameDataUrl;
+}
+
+function agendarProximaAnalise(delay = DELAY_BUSCA) {
+  limparTimer();
+  if (!autoAtivo || !sessaoId || emProcessamento) return;
+
+  // Trava local final: mesmo se algum retorno inesperado acontecer, o ciclo
+  // para sozinho e não vira loop infinito.
+  if (framesNoCiclo >= MAX_FRAMES_POR_CICLO) {
+    pausarAutomatico('Scan pausado após uma rajada curta de análise. Ajuste a folha e clique em Retomar automático.', 'warning');
+    return;
+  }
+
+  loopTimer = setTimeout(() => analisarFrame(false), delay);
+}
+
+async function iniciarSessao() {
+  try {
+    setStatus('Abrindo câmera e iniciando sessão...');
+    await abrirCameraScan();
+    const provaEl = document.getElementById('provaBase');
+    const modoEl = document.getElementById('modoScan');
+    if (!provaEl) throw new Error('Nenhuma prova disponível para iniciar o Scan.');
+
+    const provaId = provaEl.value;
+    const modo = modoEl.value;
+    const resp = await fetch("{{ url_for('iniciar_sessao_scan_rota') }}", {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prova_id: provaId, modo })
+    });
+    const dados = await resp.json();
+    if (!dados.ok) throw new Error(dados.mensagem || 'Falha ao iniciar.');
+
+    sessaoId = dados.sessao_id;
+    autoAtivo = false;
+    falhasQrSeguidas = 0;
+    framesNoCiclo = 0;
+    setBoxPausa(false);
+    badgeSessao.className = 'badge text-bg-success fs-6';
+    badgeSessao.textContent = `Sessão #${sessaoId} - ${modo}`;
+    btnIniciar.disabled = true;
+    btnAnalisar.disabled = false;
+    btnPausar.disabled = false;
+    btnFinalizar.disabled = false;
+    if (btnIdentificarManual) btnIdentificarManual.disabled = true;
+
+    setStatus('Câmera ligada. Clique em Analisar agora ou em Retomar automático para ler uma rajada curta de frames.', 'info');
+  } catch (erro) {
+    setStatus(erro.message || 'Erro ao iniciar Scan.', 'danger');
+    pararCameraScan();
+    console.error(erro);
+  }
+}
+
+function atualizarTimerLatencia(latencia) {
+  document.getElementById('ultimaLatencia').textContent = latencia;
+  document.getElementById('ultimaLatencia').className = latencia >= 1500 ? 'big-number latency-warn' : 'big-number latency-ok';
+  document.getElementById('alertaLentidao').className = latencia >= 1500 ? 'alert alert-danger mt-3 mb-0 small' : 'alert alert-light border mt-3 mb-0 small';
+  document.getElementById('alertaLentidao').textContent = latencia >= 1500 ? 'Leitura lenta. Melhore a luz ou aproxime a folha.' : 'Tempo dentro do esperado.';
+}
+
+async function analisarFrame(forcarPendencia = false, resetContador = false) {
+  if (!sessaoId || emProcessamento) return;
+  emProcessamento = true;
+  limparTimer();
+
+  if (!forcarPendencia) framesNoCiclo++;
+
+  const inicioLocal = performance.now();
+  let proximoDelay = DELAY_BUSCA;
+
+  try {
+    setGuide('');
+    if (!forcarPendencia) {
+      setStatus(`Analisando frame ${framesNoCiclo}/${MAX_FRAMES_POR_CICLO} · Tentativa QR ${falhasQrSeguidas + 1}/${MAX_FALHAS_QR}`, 'secondary');
+    }
+
+    const imagem = capturarFrameDataUrl();
+    const provaId = document.getElementById('provaBase').value;
+    const resp = await fetch("{{ url_for('processar_frame_scan_rota') }}", {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessao_id: sessaoId,
+        prova_id: provaId,
+        imagem,
+        forcar_pendencia: forcarPendencia,
+        reset_contador: resetContador
+      })
+    });
+
+    const dados = await resp.json();
+    ultimoStatus = dados.status || '';
+    const latencia = Math.round(dados.latencia_ms || performance.now() - inicioLocal);
+    atualizarTimerLatencia(latencia);
+    atualizarResumo(dados.resumo);
+
+    if (!dados.ok) {
+      if (dados.status === 'aguardando_intervalo') {
+        proximoDelay = DELAY_BUSCA;
+        setGuide('warn');
+        setStatus('Aguardando intervalo mínimo entre frames.', 'secondary');
+        return;
+      }
+
+      if (dados.status === 'buscando_qr') {
+        falhasQrSeguidas++;
+        setGuide('warn');
+        if (falhasQrSeguidas >= MAX_FALHAS_QR) {
+          pausarAutomatico('QR não encontrado. O Scan foi pausado para evitar análise infinita. Ajuste foco/luz/distância e retome.', 'warning');
+          return;
+        }
+        setStatus(`QR ainda não lido. Tentativa ${falhasQrSeguidas}/${MAX_FALHAS_QR}.`, 'warning');
+        proximoDelay = DELAY_BUSCA;
+        return;
+      }
+
+      if (dados.status === 'scan_pausado') {
+        setGuide('warn');
+        pausarAutomatico(dados.mensagem || 'Scan pausado automaticamente pelo servidor para evitar loop infinito.', 'warning');
+        return;
+      }
+
+      if (dados.status === 'qr_nao_lido_pendente') {
+        autoAtivo = false;
+        setBoxPausa(false);
+        const link = dados.pendencia_url ? ` <a class="alert-link" href="${dados.pendencia_url}">Abrir identificação manual</a>` : '';
+        setGuide('warn');
+        setStatus((dados.mensagem || 'Frame enviado para identificação manual.') + link, 'warning');
+        return;
+      }
+
+      falhasQrSeguidas++;
+      setGuide('err');
+      if (falhasQrSeguidas >= MAX_FALHAS_QR) {
+        pausarAutomatico(dados.mensagem || 'Scan pausado após falhas seguidas.', 'danger');
+        return;
+      }
+      setStatus(dados.mensagem || 'Não foi possível corrigir.', 'danger');
+      proximoDelay = DELAY_APOS_ERRO;
+      return;
+    }
+
+    // Qualquer retorno identificado para o ciclo automático. Isso impede que
+    // duplicado/revisão/sucesso fiquem reenviando frames sem parar.
+    falhasQrSeguidas = 0;
+    framesNoCiclo = 0;
+    setBoxPausa(false);
+    adicionarLeitura(dados);
+
+    if (dados.status === 'ok') {
+      setGuide('ok');
+      setStatus(`${dados.aluno}: ${dados.nota_percentual}% (${dados.acertos}/${dados.total_questoes}) · ${latencia} ms. Troque a folha e clique em Retomar automático.`, 'success');
+      beep('ok');
+      vibrar('ok');
+      pausarAutomatico('', 'success');
+      return;
+    }
+
+    if (dados.status === 'duplicado') {
+      setGuide('warn');
+      pausarAutomatico(dados.mensagem || 'Folha duplicada. Troque a folha e clique em Retomar automático.', 'secondary');
+      return;
+    }
+
+    setGuide('warn');
+    beep('erro');
+    vibrar('erro');
+    pausarAutomatico(`${dados.aluno || 'Folha'}: precisa revisar. ${dados.mensagem || ''}`, 'warning');
+  } catch (erro) {
+    falhasQrSeguidas++;
+    setGuide('err');
+    if (falhasQrSeguidas >= MAX_FALHAS_QR) {
+      pausarAutomatico(erro.message || 'Scan pausado após erros seguidos.', 'danger');
+    } else {
+      setStatus(erro.message || 'Erro no Scan.', 'danger');
+    }
+    console.error(erro);
+    proximoDelay = DELAY_APOS_ERRO;
+  } finally {
+    emProcessamento = false;
+    if (autoAtivo) agendarProximaAnalise(proximoDelay);
+  }
+}
+
+async function finalizarSessao() {
+  if (!sessaoId) {
+    pararCameraScan();
+    return;
+  }
+  autoAtivo = false;
+  limparTimer();
+  const id = sessaoId;
+  try {
+    await fetch("{{ url_for('finalizar_sessao_scan_rota') }}", {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessao_id: sessaoId })
+    });
+  } catch (e) {}
+  sessaoId = null;
+  pararCameraScan();
+  window.location.href = "{{ url_for('resumo_sessao_scan_rota', sessao_id=0) }}".replace('0', String(id));
+}
+
+if (btnIniciar) btnIniciar.addEventListener('click', iniciarSessao);
+if (btnAnalisar) btnAnalisar.addEventListener('click', () => analisarFrame(false, true));
+if (btnIdentificarManual) btnIdentificarManual.addEventListener('click', () => {
+  autoAtivo = false;
+  framesNoCiclo = 0;
+  setBoxPausa(false);
+  analisarFrame(true, false);
+});
+if (btnPausar) btnPausar.addEventListener('click', () => {
+  if (!sessaoId) return;
+  autoAtivo = !autoAtivo;
+  btnPausar.textContent = autoAtivo ? 'Pausar automático' : 'Retomar automático';
+  setBoxPausa(false);
+  if (autoAtivo) {
+    falhasQrSeguidas = 0;
+    framesNoCiclo = 0;
+    setStatus('Leitura automática retomada em rajada curta. Ela vai pausar sozinha se não encontrar QR.', 'info');
+    agendarProximaAnalise(120);
+  } else {
+    limparTimer();
+    setStatus('Leitura automática pausada.', 'info');
+  }
+});
+if (btnFinalizar) btnFinalizar.addEventListener('click', finalizarSessao);
+
+window.addEventListener('beforeunload', desligarAoSair);
+window.addEventListener('pagehide', desligarAoSair);
+document.addEventListener('visibilitychange', () => { if (document.hidden) pararCameraScan(); });
 </script>
 {% endblock %}
